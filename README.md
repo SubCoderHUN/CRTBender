@@ -1,8 +1,8 @@
 # CRTBender
 
-Software geometry correction for CRT monitors on Windows. The program pre-distorts the desktop image so that after the monitor's own distortion, it becomes straight—without physical adjustments, service menus, or a soldering iron.
+Software geometry correction for CRT monitors on Windows. The program pre-distorts the desktop image so that after the monitor's own distortion, it becomes straight-without physical adjustments, service menus, or a soldering iron.
 
-The correction applies to the **entire screen**: a 15×15 grid (adjustable, 3×3 … 21×21) lies over the whole image, and by moving any of its points up/down (or left/right as needed), you shape the geometry—corners, edges, center, anywhere.
+The correction applies to the **entire screen**: a 15×15 grid (adjustable, 3×3 … 21×21) lies over the whole image, and by moving any of its points up/down (or left/right as needed), you shape the geometry-corners, edges, center, anywhere.
 
 ---
 
@@ -22,20 +22,20 @@ The correction applies to the **entire screen**: a 15×15 grid (adjustable, 3×3
 
 ## Limitations (Honestly)
 
-- **Cannot draw over exclusive fullscreen games.** It works in borderless windowed mode. (For exclusive fullscreen, the warp shader would need to be integrated into the game's render pipeline — see the Roadmap section.)
+- **Cannot draw over exclusive fullscreen games.** It works in borderless windowed mode. (For exclusive fullscreen, the warp shader would need to be integrated into the game's render pipeline - see the Roadmap section.)
 - **DRM-protected video** (Netflix, Disney+ in browsers) appears black in captures because Desktop Duplication returns it that way. In such cases, disable correction with `Ctrl+Alt+B`.
 - **Does not distort the mouse cursor.** The cursor is rendered above everything by hardware; it offsets from content near the top of the screen by the amount of correction (a few pixels). This is an intentional choice: a software-rendered, distorted cursor would blur.
 - **Single monitor only.** Currently, it always targets the primary monitor.
-- **Resampling**, meaning curved regions soften slightly. This is a mathematical necessity: if an image is shifted by a fractional pixel, it must be resampled. However, the loss can be minimized—see the "Image Quality" section.
+- **Resampling**, meaning curved regions soften slightly. This is a mathematical necessity: if an image is shifted by a fractional pixel, it must be resampled. However, the loss can be minimized-see the "Image Quality" section.
 - Adds one frame of input lag. Unnoticeable for desktop work.
 
 ---
 
 ## Pre-built Executable
 
-The compiled `dist/CRTBender.exe` is included in the repository — download, run, and you're set. A single executable with no installation and no runtime dependencies (static CRT); settings are saved under `%APPDATA%\CRTBender`.
+The compiled `dist/CRTBender.exe` is included in the repository - download, run, and you're set. A single executable with no installation and no runtime dependencies (static CRT); settings are saved under `%APPDATA%\CRTBender`.
 
-> **Note:** This binary was compiled on Linux using the mingw-w64 cross-compiler and **has not been tested on Windows yet**. The code builds and mathematical unit tests pass, but actual execution (D3D11, Desktop Duplication, tray icon) can only be verified on a live Windows machine. If something fails to start, `%APPDATA%\CRTBender\crtbender.log` logs all error codes. For production use, building your own executable with Visual Studio is recommended — see below.
+> **Note:** This binary was compiled on Linux using the mingw-w64 cross-compiler and **has not been tested on Windows yet**. The code builds and mathematical unit tests pass, but actual execution (D3D11, Desktop Duplication, tray icon) can only be verified on a live Windows machine. If something fails to start, `%APPDATA%\CRTBender\crtbender.log` logs all error codes. For production use, building your own executable with Visual Studio is recommended - see below.
 
 Rebuilding on Linux: `./tools/build.sh` (this updates `dist/CRTBender.exe` and runs tests).
 
@@ -68,14 +68,14 @@ On first launch, the calibration window opens automatically. Afterwards, the app
 
 1. **Enable the test pattern** (`Ctrl+Alt+G` or via the dropdown on the panel). Start with the "Over Desktop" option so you can see the editor at the same time.
 2. **Go through the image.** The grid covers the entire screen, meaning you aren't limited to adjusting just the top edge: side curvature (pincushion/barrel), corner pull-in, trapezoid distortion, and even local irregularities in the center are adjusted the same way. Wherever a line should be straight but isn't, drag the nearest grid points.
-3. **Correction direction is inverted relative to the flaw.** If the monitor bends the image *upward* in an area, drag the point *downward*. With "Left/Right Mirroring" enabled, the opposite side automatically mirrors your movements — CRT distortion is almost always symmetrical across the vertical axis.
+3. **Correction direction is inverted relative to the flaw.** If the monitor bends the image *upward* in an area, drag the point *downward*. With "Left/Right Mirroring" enabled, the opposite side automatically mirrors your movements - CRT distortion is almost always symmetrical across the vertical axis.
 4. **Lock what's already good.** Each row has a small padlock icon on the left side of the grid. Once a band is aligned, lock it so it won't move by accident.
 5. **Fine-tune with arrow keys.** Arrow key = 0.25 px, `Shift`+Arrow = 1 px, `Ctrl`+Arrow = 0.05 px. The panel always displays the selected point's offset in screen pixels.
 6. **Messed up a point?** Double-click it to snap it back to zero. `Ctrl+Z` undoes the last step.
 7. **Verify with `Ctrl+Alt+B`.** Toggling back and forth instantly shows whether geometry improved.
-8. When finished, click `Save` — or simply close the window, as it saves automatically.
+8. When finished, click `Save` - or simply close the window, as it saves automatically.
 
-Anything you do not move **remains exactly in place** — thanks to monotonic interpolation, correction does not "bleed" into good parts of the image. You can safely fix problematic areas individually.
+Anything you do not move **remains exactly in place** - thanks to monotonic interpolation, correction does not "bleed" into good parts of the image. You can safely fix problematic areas individually.
 
 ### What grid size to use?
 
@@ -147,7 +147,7 @@ Log file: `%APPDATA%\CRTBender\crtbender.log` (accessible directly from the tray
 
 ## Launching with Windows
 
-Can be enabled via the tray menu or calibration window. Writes to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key — requires no administrator privileges and installs no system services. When launched at system startup, the program runs with the `--silent` flag: it minimizes to the system tray and loads saved corrections automatically.
+Can be enabled via the tray menu or calibration window. Writes to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key - requires no administrator privileges and installs no system services. When launched at system startup, the program runs with the `--silent` flag: it minimizes to the system tray and loads saved corrections automatically.
 
 ---
 
@@ -160,7 +160,7 @@ DXGI Desktop Duplication ─► D3D11 Texture ─► Draw Warped Grid
 
 Key design decisions:
 
-**The overlay excludes itself from capture.** Without this, Desktop Duplication would capture its own rendered overlay, resulting in an infinite feedback loop. `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` resolves this: the window remains visible on the physical display while remaining invisible to the desktop capture pipeline. If this call fails (on Windows 10 versions older than 2004), the program **will not initiate** correction and reports an error instead. Side effect: screenshots taken by the user will capture the un-warped desktop — which is correct behavior.
+**The overlay excludes itself from capture.** Without this, Desktop Duplication would capture its own rendered overlay, resulting in an infinite feedback loop. `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` resolves this: the window remains visible on the physical display while remaining invisible to the desktop capture pipeline. If this call fails (on Windows 10 versions older than 2004), the program **will not initiate** correction and reports an error instead. Side effect: screenshots taken by the user will capture the un-warped desktop - which is correct behavior.
 
 **Rendering runs on a dedicated thread.** System tray handling and the editor UI reside on the main thread. If unified on a single thread, dragging a window title bar would enter a modal loop and freeze screen updates.
 
@@ -170,7 +170,7 @@ Key design decisions:
 
 **Identity scaling when disabled.** When turned off, the grid represents identity mapping; every vertex maps precisely to its corresponding texel, and bilinear sampling evaluates to exact pixels. Consequently, toggling `Ctrl+Alt+B` truly compares correction versus non-correction without introducing resampling artifacts.
 
-**Monotonic cubic vs. Catmull-Rom.** Switched based on measurement: with Catmull-Rom, a 6 px top correction caused an opposing ~0.45 px deflection near the upper third of the screen — distorting areas that were already correct. Fritsch-Carlson monotonic cubic Hermite interpolation passes through all control points precisely (dragging 6 px moves exactly 6 px) without overshooting: unadjusted points remain fixed in place. Evaluated in `tests/test_warp.cpp`.
+**Monotonic cubic vs. Catmull-Rom.** Switched based on measurement: with Catmull-Rom, a 6 px top correction caused an opposing ~0.45 px deflection near the upper third of the screen - distorting areas that were already correct. Fritsch-Carlson monotonic cubic Hermite interpolation passes through all control points precisely (dragging 6 px moves exactly 6 px) without overshooting: unadjusted points remain fixed in place. Evaluated in `tests/test_warp.cpp`.
 
 ---
 
