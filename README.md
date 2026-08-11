@@ -1,6 +1,6 @@
 # CRTBender
 
-Software geometry correction for CRT monitors on Windows. Pre-distorts the desktop image via DXGI Desktop Duplication and Direct3D 11 so that after your CRT's physical distortion, the image ends up straight—no hardware mods or service menu tweaking required.
+Software geometry correction for CRT monitors on Windows. Pre-distorts the desktop image via DXGI Desktop Duplication and Direct3D 11 so that after your CRT's physical distortion, the image ends up straight-no hardware mods or service menu tweaking required.
 
 <img width="1151" height="835" alt="bender" src="https://github.com/user-attachments/assets/22555c8a-007c-45b9-b8e5-3dc6b8373db8" />
 
