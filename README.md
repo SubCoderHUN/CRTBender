@@ -3,6 +3,7 @@
 Software geometry correction for CRT monitors on Windows. The program pre-distorts the desktop image so that after the monitor's own distortion, it becomes straight-without physical adjustments, service menus, or a soldering iron.
 
 The correction applies to the **entire screen**: a 15×15 grid (adjustable, 3×3 … 21×21) lies over the whole image, and by moving any of its points up/down (or left/right as needed), you shape the geometry-corners, edges, center, anywhere.
+<img width="1151" height="835" alt="bender" src="https://github.com/user-attachments/assets/b0aab765-eba5-4e36-a244-a87d3068498a" />
 
 ---
 
