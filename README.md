@@ -35,8 +35,6 @@ The correction applies to the **entire screen**: a 15×15 grid (adjustable, 3×3
 
 The compiled `dist/CRTBender.exe` is included in the repository - download, run, and you're set. A single executable with no installation and no runtime dependencies (static CRT); settings are saved under `%APPDATA%\CRTBender`.
 
-> **Note:** This binary was compiled on Linux using the mingw-w64 cross-compiler and **has not been tested on Windows yet**. The code builds and mathematical unit tests pass, but actual execution (D3D11, Desktop Duplication, tray icon) can only be verified on a live Windows machine. If something fails to start, `%APPDATA%\CRTBender\crtbender.log` logs all error codes. For production use, building your own executable with Visual Studio is recommended - see below.
-
 Rebuilding on Linux: `./tools/build.sh` (this updates `dist/CRTBender.exe` and runs tests).
 
 ## Compiling on Windows
