@@ -1,0 +1,28 @@
+# Build output
+build/
+out/
+cmake-build-*/
+*.obj
+*.o
+*.exe
+# ...except the shipped build, which is committed on purpose.
+!dist/CRTBender.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.res
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+CMakeSettings.json
+CMakeUserPresets.json
+
+# Installer output
+installer/Output/
+
+# Local runtime files (portable mode drops these next to the exe)
+crtbender.cfg
+crtbender.log
