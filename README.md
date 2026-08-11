@@ -1,88 +1,57 @@
 # CRTBender
 
-Szoftveres geometria-korrekció CRT monitorokhoz Windowson. A program elő-torzítja
-az asztal képét úgy, hogy a monitor saját torzítása után egyenes legyen - fizikai
-állítgatás, szervizmenü és forrasztópáka nélkül.
+Software geometry correction for CRT monitors on Windows. The program pre-distorts the desktop image so that after the monitor's own distortion, it becomes straight—without physical adjustments, service menus, or a soldering iron.
 
-A korrekció a **teljes képernyőre** vonatkozik: egy 15×15-ös rács (állítható,
-3×3 … 21×21) fekszik az egész képen, és bármelyik pontját fel-le (igény szerint
-balra-jobbra is) mozgatva alakítod a geometriát - sarkok, szélek, közép, bárhol.
+The correction applies to the **entire screen**: a 15×15 grid (adjustable, 3×3 … 21×21) lies over the whole image, and by moving any of its points up/down (or left/right as needed), you shape the geometry—corners, edges, center, anywhere.
 
 ---
 
-## Mit tud
+## Features
 
-- **Rendszerszintű**: az egész elsődleges monitor képét korrigálja, nem
-  alkalmazásonként.
-- **15×15-ös rács a teljes képen** (225 kontrollpont), monoton köbös
-  interpolációval (lásd lentebb, miért nem Catmull-Rom). Igény szerint 3×3-tól
-  21×21-ig állítható: durva formára kevesebb pont kényelmesebb, helyi
-  szabálytalanságra sűrűbb kell.
-- **Profilok felbontás + frissítési frekvencia szerint.** CRT-n a geometria
-  timingfüggő: az `1600x1200@85` és az `1280x960@75` másképp torzul. A program
-  felismeri a módváltást és automatikusan vált profilt.
-- **Tesztminta** (rácsháló + keret + középkereszt) az asztal fölé vagy fekete
-  háttérre, hogy legyen mihez igazítani.
-- **Gyorsbillentyűk** kalibráláshoz:
-  - `Ctrl+Alt+B` - korrekció ki/be (A/B összehasonlítás, egyben **pánik gomb**)
-  - `Ctrl+Alt+G` - tesztminta léptetése
-  - `Esc` - tesztminta ki (csak amíg a minta látszik, akkor sem veszi el más
-    programtól)
-  - `Ctrl+Alt+E` - kalibráló ablak
-- **Nyelv**: angol és magyar, a tálcamenüből vagy a kalibráló ablakból váltható.
-  Alapértelmezés angol; a választás a CFG fájlba kerül, és induláskor betöltődik.
-- **Tálcaikon**, CFG fájlba mentett beállítások, opcionális indulás a Windowszal.
+- **System-wide**: corrects the entire primary monitor image, not on a per-application basis.
+- **15×15 grid over the full image** (225 control points), using monotonic cubic interpolation (see below why not Catmull-Rom). Adjustable from 3×3 up to 21×21 as needed: fewer points are more convenient for coarse shaping, while a denser grid is needed for local irregularities.
+- **Profiles by resolution + refresh rate.** Geometry on a CRT is timing-dependent: `1600x1200@85` and `1280x960@75` distort differently. The program detects mode switches and automatically changes profiles.
+- **Test pattern** (grid + frame + center cross) over the desktop or on a black background to serve as an alignment guide.
+- **Hotkeys** for calibration:
+  - `Ctrl+Alt+B` - toggle correction on/off (A/B comparison, also serves as a **panic button**)
+  - `Ctrl+Alt+G` - cycle test pattern
+  - `Esc` - disable test pattern (only active while the pattern is visible, without stealing input from other applications)
+  - `Ctrl+Alt+E` - open calibration window
+- **Language**: English and Hungarian, switchable from the tray menu or the calibration window. Default is English; the choice is saved to the CFG file and loaded at startup.
+- **Tray icon**, settings saved to a CFG file, optional launch with Windows.
 
-## Mit nem tud (őszintén)
+## Limitations (Honestly)
 
-- **Exkluzív teljes képernyős játékok** fölé nem tud rajzolni. Borderless
-  windowed módban működik. (Ezekhez a warp-shadert a játék render-pipeline-jába
-  kellene beépíteni - lásd a Tervek szakaszt.)
-- **DRM-védett videó** (Netflix, Disney+ böngészőben) feketén jelenik meg a
-  rögzítésben, mert a Desktop Duplication így adja vissza. Ilyenkor kapcsold ki
-  a korrekciót `Ctrl+Alt+B`-vel.
-- **Az egérkurzort nem torzítja.** A kurzort a hardver rajzolja mindenek fölé;
-  a korrekció mértékével (néhány pixel) eltér a tartalomtól a képernyő tetején.
-  Ez tudatos döntés: egy szoftveresen rajzolt, torzított kurzor elmosódna.
-- **Egy monitor.** Jelenleg mindig az elsődleges monitort veszi alapul.
-- **Újramintavételezés**, tehát a hajlított részek minimálisan lágyulnak. Ez
-  matematikai szükségszerűség: ha a képet töredékpixelnyivel eltolod, újra kell
-  mintavételezni. A veszteség viszont csökkenthető, lásd a „Képminőség" szakaszt.
-- Egy képkockányi késleltetést ad hozzá. Asztali munkára észrevehetetlen.
+- **Cannot draw over exclusive fullscreen games.** It works in borderless windowed mode. (For exclusive fullscreen, the warp shader would need to be integrated into the game's render pipeline — see the Roadmap section.)
+- **DRM-protected video** (Netflix, Disney+ in browsers) appears black in captures because Desktop Duplication returns it that way. In such cases, disable correction with `Ctrl+Alt+B`.
+- **Does not distort the mouse cursor.** The cursor is rendered above everything by hardware; it offsets from content near the top of the screen by the amount of correction (a few pixels). This is an intentional choice: a software-rendered, distorted cursor would blur.
+- **Single monitor only.** Currently, it always targets the primary monitor.
+- **Resampling**, meaning curved regions soften slightly. This is a mathematical necessity: if an image is shifted by a fractional pixel, it must be resampled. However, the loss can be minimized—see the "Image Quality" section.
+- Adds one frame of input lag. Unnoticeable for desktop work.
 
 ---
 
-## Kész program
+## Pre-built Executable
 
-A lefordított `dist/CRTBender.exe` benne van a repóban - letöltöd, elindítod,
-kész. Egyetlen fájl, nincs telepítés és nincs futásidejű függősége (statikus
-CRT), a beállításokat a `%APPDATA%\CRTBender` alá írja.
+The compiled `dist/CRTBender.exe` is included in the repository — download, run, and you're set. A single executable with no installation and no runtime dependencies (static CRT); settings are saved under `%APPDATA%\CRTBender`.
 
-> **Figyelem:** ez a bináris mingw-w64 keresztfordítóval, Linuxon készült, és
-> **nem futott még Windowson**. A kód fordul és a matematikai tesztek átmennek,
-> de a tényleges futást (D3D11, Desktop Duplication, tálcaikon) csak éles gépen
-> lehet ellenőrizni. Ha valami nem indul, a `%APPDATA%\CRTBender\crtbender.log`
-> minden hibakódot naplóz. Éles használatra a saját, Visual Studióval fordított
-> build a biztosabb - lásd alább.
+> **Note:** This binary was compiled on Linux using the mingw-w64 cross-compiler and **has not been tested on Windows yet**. The code builds and mathematical unit tests pass, but actual execution (D3D11, Desktop Duplication, tray icon) can only be verified on a live Windows machine. If something fails to start, `%APPDATA%\CRTBender\crtbender.log` logs all error codes. For production use, building your own executable with Visual Studio is recommended — see below.
 
-Újrafordítás Linuxon: `./tools/build.sh` (ez frissíti a `dist/CRTBender.exe`-t
-és lefuttatja a teszteket).
+Rebuilding on Linux: `./tools/build.sh` (this updates `dist/CRTBender.exe` and runs tests).
 
-## Fordítás Windowson
+## Compiling on Windows
 
-Kell hozzá: **Visual Studio 2019/2022** (C++ desktop workload) és **CMake 3.20+**.
-Nincs külső függőség.
+Requirements: **Visual Studio 2019/2022** (C++ desktop workload) and **CMake 3.20+**. No external dependencies.
 
 ```powershell
 cmake -B build -A x64
 cmake --build build --config Release
-# eredmény: build\Release\CRTBender.exe
+# Output: build\Release\CRTBender.exe
 ```
 
-A `d3dcompiler_47.dll` a Windows része, nem kell mellécsomagolni. Az exe statikus
-CRT-vel épül, tehát nem igényel Visual C++ Redistributable-t.
+`d3dcompiler_47.dll` is part of Windows and does not need to be bundled. The executable is built with a static CRT runtime, so it does not require the Visual C++ Redistributable.
 
-A warp-matematika platformfüggetlen, külön is tesztelhető:
+The warp math is platform-independent and can be tested separately:
 
 ```powershell
 cmake --build build --target warp_tests
@@ -91,125 +60,78 @@ cmake --build build --target warp_tests
 
 ---
 
-## Használat
+## Usage
 
-Első indításkor magától megnyílik a kalibráló ablak. Utána a program a tálcán
-lakik; bal klikk a kalibrálásra, jobb klikk a menüre.
+On first launch, the calibration window opens automatically. Afterwards, the application lives in the system tray; left-click to open calibration, right-click for the context menu.
 
-### Kalibrálási menet
+### Calibration Workflow
 
-1. **Kapcsold be a tesztmintát** (`Ctrl+Alt+G` vagy a legördülő a panelen).
-   Kezdd az „Asztal felett" opcióval, hogy közben lásd a szerkesztőt is.
-2. **Menj végig a képen.** A rács az egész képernyőt lefedi, tehát nem csak a
-   felső élt tudod állítani: a szélek íve (pincushion/barrel), a sarkok
-   behúzása, a trapéz, sőt a kép közepének helyi szabálytalansága is
-   ugyanígy megy. Ahol egyenesnek kellene lennie egy vonalnak és nem az, ott
-   húzd a hozzá legközelebbi rácspontokat.
-3. **A korrekció iránya fordított a hibáéval.** Ha a monitor *felfelé* hajlítja
-   ott a képet, húzd a pontot *lefelé*. A „Bal/jobb tükrözés" bekapcsolva a
-   másik oldal automatikusan követi - a CRT torzítása szinte mindig szimmetrikus
-   a függőleges tengelyre.
-4. **Zárold, ami már jó.** A rács bal szélén minden sornál van egy kis lakat.
-   Ha egy sáv rendben van, zárold, és onnantól véletlenül sem mozdul el.
-5. **Finomhangolj a nyilakkal.** Nyíl = 0,25 px, `Shift`+nyíl = 1 px,
-   `Ctrl`+nyíl = 0,05 px. A panelen mindig látod a kijelölt pont eltolását
-   képernyőpixelben.
-6. **Elrontottál egy pontot?** Kattints rá duplán, és visszaugrik nullára.
-   `Ctrl+Z` visszavonja az utolsó lépést.
-7. **Ellenőrizd `Ctrl+Alt+B`-vel.** Ki-be kapcsolgatva azonnal látszik, javult-e.
-8. Ha kész, `Mentés` - vagy csak zárd be az ablakot, az is ment.
+1. **Enable the test pattern** (`Ctrl+Alt+G` or via the dropdown on the panel). Start with the "Over Desktop" option so you can see the editor at the same time.
+2. **Go through the image.** The grid covers the entire screen, meaning you aren't limited to adjusting just the top edge: side curvature (pincushion/barrel), corner pull-in, trapezoid distortion, and even local irregularities in the center are adjusted the same way. Wherever a line should be straight but isn't, drag the nearest grid points.
+3. **Correction direction is inverted relative to the flaw.** If the monitor bends the image *upward* in an area, drag the point *downward*. With "Left/Right Mirroring" enabled, the opposite side automatically mirrors your movements — CRT distortion is almost always symmetrical across the vertical axis.
+4. **Lock what's already good.** Each row has a small padlock icon on the left side of the grid. Once a band is aligned, lock it so it won't move by accident.
+5. **Fine-tune with arrow keys.** Arrow key = 0.25 px, `Shift`+Arrow = 1 px, `Ctrl`+Arrow = 0.05 px. The panel always displays the selected point's offset in screen pixels.
+6. **Messed up a point?** Double-click it to snap it back to zero. `Ctrl+Z` undoes the last step.
+7. **Verify with `Ctrl+Alt+B`.** Toggling back and forth instantly shows whether geometry improved.
+8. When finished, click `Save` — or simply close the window, as it saves automatically.
 
-Amit nem mozgatsz, az **pontosan a helyén marad** - a monoton interpoláció miatt
-a korrekció nem „szivárog át" a kép jó részeire. Ezért nyugodtan lehet egy-egy
-problémás területet külön-külön rendbe tenni.
+Anything you do not move **remains exactly in place** — thanks to monotonic interpolation, correction does not "bleed" into good parts of the image. You can safely fix problematic areas individually.
 
-### Mekkora rács kell?
+### What grid size to use?
 
-A 15×15 jó alapértelmezés: egy 1600×1200-as képen ~107 pixelenként van
-kontrollpont. Ha csak a kép nagy léptékű íveit igazítod, a 7×7 vagy 9×9
-kényelmesebb (kevesebb pont, gyorsabb munka). Ha egy kicsi, helyi
-szabálytalanságot kell kilőni, válts 21×21-re. Váltásnál a meglévő alak
-megmarad: a program újramintavételezi a görbét az új rácsra.
+15×15 is a solid default: on a 1600×1200 screen, control points are spaced ~107 pixels apart. If you are only adjusting large-scale curves, 7×7 or 9×9 is more convenient (fewer points, faster workflow). If you need to fix a small local anomaly, switch to 21×21. When switching, the existing shape is preserved: the program resamples the curve onto the new grid density.
 
-### A szerkesztő nagyítása
+### Editor Zoom
 
-A valódi korrekció pár pixel 1200-ból, ami az előnézeti rácson láthatatlan lenne.
-A „Szerkesztő nagyítás" csúszka **csak az előnézetet** nagyítja (alapból 8×), a
-tényleges képre nincs hatása. Egyben a húzás érzékenységét is ez szabja meg:
-nagyobb nagyítás = finomabb húzás.
+Actual correction is only a few pixels out of 1200, which would be invisible on the preview grid. The "Editor Zoom" slider **only scales the preview** (default is 8×) and has no effect on the rendered output. It also sets drag sensitivity: higher zoom = finer control.
 
-### Képminőség
+### Image Quality
 
-Ahol a kép el van tolva egy töredékpixellel, ott újramintavételezés történik, és
-ez elkerülhetetlenül lágyít valamennyit. Három dolog számít:
+Wherever the image is shifted by a subpixel amount, resampling occurs, which inevitably causes slight softening. Three factors determine quality:
 
-- **Az újramintavételezés minősége** (a panelen állítható):
-  - *Bilineáris* - a leggyorsabb és a leglágyabb.
-  - *Bikubikus* - kiegyensúlyozott (a korábbi alapértelmezés).
-  - *Éles - Lanczos + gyűrűzésgátlás* - **ez az új alapértelmezés.** A Lanczos-3
-    ablakfüggvény megtartja azokat a magas frekvenciákat, amiket a bikubikus
-    lekerekít, így a korrigált részek nagyjából olyan élesek maradnak, mint az
-    érintetlenek. Az élesebb szűrők viszont túllőnek a kontrasztos éleknél, ami
-    szöveg körül glóriaként látszik; ezért a program a végeredményt a négy
-    legközelebbi minta értéktartományába szorítja. Ez pontosan a túllövést
-    tünteti el, mást nem.
-- **Amit nem mozgatsz, az bitre pontos marad.** Nulla eltolásnál mindegyik
-  szűrő azonosságra egyszerűsödik, tehát az érintetlen területek egyáltalán nem
-  romlanak. Ezért érdemes csak ott húzni a pontokat, ahol tényleg kell.
-- **Az overscan viszont az egész képet rontja.** 100 % fölött a teljes kép
-  átméreteződik, tehát mindenhol újramintavételezés lesz. Hagyd 100 %-on; a
-  fekete szélek ellen az automatikus szélkitöltés a helyes eszköz.
+- **Resampling Quality** (selectable on the panel):
+  - *Bilinear* - fastest and softest.
+  - *Bicubic* - balanced (former default).
+  - *Sharp - Lanczos + Anti-ringing* - **the new default.** The Lanczos-3 window function preserves high frequencies that bicubic smooths out, keeping corrected areas nearly as sharp as untouched ones. However, sharper filters overshoot on high-contrast edges, appearing as halos around text; to prevent this, the program clamps the result to the value range of the four nearest samples. This eliminates ringing without affecting anything else.
+- **Untouched areas remain bit-exact.** At zero offset, all filters simplify to identity, meaning pristine regions experience zero degradation. It is best to drag points only where strictly necessary.
+- **Overscan degrades the entire image.** Above 100%, the full image is scaled, forcing resampling across the entire screen. Keep overscan at 100%; automatic edge fill is the proper solution for black borders.
 
-### Overscan és szélkitöltés
+### Overscan and Edge Fill
 
-Ha lefelé tolod a kép tetejét, felül elvileg fekete csík maradna. Két megoldás:
+If you pull the top of the image downward, a black strip would theoretically remain at the top. Two solutions are available:
 
-- **Szélkitöltés** (alapból automatikus): a rács külső gyűrűje a képernyőn kívülre
-  lóg, és a szélső pixelsort keni ki. Ez az alapértelmezés, nem veszít tartalmat.
-- **Overscan (zoom)**: 100-115%-os nagyítás a kép közepe körül. Biztosabb, de a
-  szélekből levág. Csak akkor kell, ha nagyon nagy a korrekció.
+- **Edge Fill** (automatic by default): the outer ring of the grid extends beyond the screen, smearing the outermost pixel row. This is default behavior and preserves screen content.
+- **Overscan (zoom)**: 100-115% scaling centered on the screen. More foolproof, but crops the edges. Only necessary for very large corrections.
 
 ---
 
-## Ha valami nem stimmel
+## Troubleshooting
 
-**Pánik gomb: `Ctrl+Alt+B`.** Ez kapcsolja ki a korrekciót, és bármikor
-visszaadja a normál képet. A tesztmintából az `Esc` léptet ki.
+**Panic Button: `Ctrl+Alt+B`.** Disables correction and restores the standard desktop image at any time. `Esc` exits the test pattern.
 
-**Fekete képernyő bekapcsoláskor.** Nyisd meg a naplót (tálcamenü → *Napló
-megnyitása*) és keresd a `Capture check:` sort. Ez megmondja, hogy a program
-egyáltalán lát-e képet:
+**Black screen when enabled.** Open the log file (Tray menu → *Open Log*) and look for the `Capture check:` line. This indicates whether the program receives video frames at all:
 
-- `... - good` → a rögzítés jó, tehát a megjelenítéssel van baj. Próbáld ki a
-  `present_mode = flip` beállítást a config fájlban (alapból `bitblt`), majd
-  indítsd újra a programot.
-- `... - BLANK` → a rögzítés ad üres képet. Ilyenkor a program **magától nem
-  jeleníti meg az átfedést**, hogy ne takarja le az asztalt, és ezt a tálcán is
-  jelzi. A `Present model:` és `Source texture` sorok mutatják, milyen módban
-  fut.
+- `... - good` → capture is functioning properly, meaning rendering is at fault. Try changing `present_mode = flip` in the configuration file (default is `bitblt`), then restart the application.
+- `... - BLANK` → capture yields blank images. In this case, the program **does not render the overlay** to avoid covering the desktop, and indicates this state in the tray menu. `Present model:` and `Source texture` lines show which mode is running.
 
-**Nem lehet kattintani semmire.** Ez az 1.0-s kiadás hibája volt (hiányzott a
-`WS_EX_LAYERED` az átfedő ablakról); javítva. Ha mégis előfordulna, a program
-indulásakor ellenőrzi, hogy az ablak tényleg kattintás-átengedő-e, és ha nem,
-el sem indítja a korrekciót - a napló ekkor a
-`Overlay is not click-through` sort tartalmazza.
+**Cannot click on anything.** This was a bug in version 1.0 (missing `WS_EX_LAYERED` on the overlay window); now fixed. If it occurs, the application checks on startup whether the window properly passes through mouse clicks; if not, correction will not start, and the log records `Overlay is not click-through`.
 
 ---
 
-## Beállítások fájlja
+## Configuration File
 
-`%APPDATA%\CRTBender\crtbender.cfg` - sima szöveg, kézzel is szerkeszthető.
-Ha a `crtbender.cfg` az exe mellé kerül, a program azt használja (hordozható mód).
+`%APPDATA%\CRTBender\crtbender.cfg` - plain text, editable manually.
+If `crtbender.cfg` is placed alongside the executable, the program uses it directly (portable mode).
 
 ```ini
 [general]
 enabled         = 1
 autostart       = 0
-pattern_mode    = 0      # 0=ki, 1=asztal felett, 2=fekete hatteren
-present_mode    = bitblt # bitblt vagy flip
+pattern_mode    = 0      # 0=off, 1=over desktop, 2=black background
+present_mode    = bitblt # bitblt or flip
 preview_gain    = 8
-language        = en     # en vagy hu
-quality         = 2      # 0=bilineáris, 1=bikubikus, 2=éles (Lanczos)
+language        = en     # en or hu
+quality         = 2      # 0=bilinear, 1=bicubic, 2=sharp (Lanczos)
 
 [profile:1600x1200@85]
 grid     = 15
@@ -219,85 +141,54 @@ locked   = 3,4
 row.0    = +0.00000,+0.00333 +0.00000,+0.00417 ...
 ```
 
-Az eltolások normalizáltak: a képernyő szélességének/magasságának törtrésze.
-`+0.005` egy 1200 pixel magas képernyőn 6 pixel lefelé.
+Offsets are normalized as fractions of screen width/height. `+0.005` on a 1200-pixel high display represents 6 pixels downward.
 
-Napló: `%APPDATA%\CRTBender\crtbender.log` (a tálcamenüből is megnyitható).
+Log file: `%APPDATA%\CRTBender\crtbender.log` (accessible directly from the tray menu).
 
-## Indulás a Windowszal
+## Launching with Windows
 
-A tálcamenüben vagy a kalibráló ablakban kapcsolható. A
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` kulcsba ír - nem kell hozzá
-rendszergazda, és nem telepít szolgáltatást. Ilyenkor a program `--silent`
-kapcsolóval indul: csak a tálcán jelenik meg, és betölti a mentett korrekciót.
+Can be enabled via the tray menu or calibration window. Writes to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key — requires no administrator privileges and installs no system services. When launched at system startup, the program runs with the `--silent` flag: it minimizes to the system tray and loads saved corrections automatically.
 
 ---
 
-## Hogyan működik
+## How It Works
 
 ```
-DXGI Desktop Duplication ─► D3D11 textúra ─► torzított rács kirajzolása
-                                          ─► teljes képernyős, kattintás-átengedő overlay
+DXGI Desktop Duplication ─► D3D11 Texture ─► Draw Warped Grid
+                                          ─► Fullscreen Click-Through Overlay
 ```
 
-Néhány döntés, ami nem magától értetődő:
+Key design decisions:
 
-**Az overlay kizárja magát a rögzítésből.** Enélkül a saját képét kapná vissza a
-Desktop Duplicationtől, és végtelen visszacsatolás lenne. A
-`SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` pont ezt oldja meg: az
-ablak látszik a fizikai képernyőn, de a rögzítés számára láthatatlan. Ha ez a
-hívás nem sikerül (Windows 10 2004-nél régebbi rendszer), a program **nem indítja
-el** a korrekciót, hanem hibát jelez. Mellékhatás: a *te* képernyőképeid is a
-torzítatlan asztalt mutatják - ami helyes viselkedés.
+**The overlay excludes itself from capture.** Without this, Desktop Duplication would capture its own rendered overlay, resulting in an infinite feedback loop. `SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)` resolves this: the window remains visible on the physical display while remaining invisible to the desktop capture pipeline. If this call fails (on Windows 10 versions older than 2004), the program **will not initiate** correction and reports an error instead. Side effect: screenshots taken by the user will capture the un-warped desktop — which is correct behavior.
 
-**A rajzolás külön szálon fut.** A tálca és a szerkesztő a fő szálon él. Ha egy
-szálon lennének, egy ablak címsoránál fogva húzása modális ciklusba lépne és
-megfagyasztaná a képernyőt.
+**Rendering runs on a dedicated thread.** System tray handling and the editor UI reside on the main thread. If unified on a single thread, dragging a window title bar would enter a modal loop and freeze screen updates.
 
-**Előre-leképezés, nem inverz.** Egy sűrűn tesszellált rács *csúcspontjai*
-hordozzák az eltolást, a textúrakoordináták a szabályos rácson maradnak. Így az
-interpolációt a raszterizáló végzi, és a shader triviális marad. Az inverz
-leképezéshez iteratívan kellene invertálni az eltolásmezőt. A felosztás a
-rácsmérethez igazodik: legalább 10 osztás jut minden rácscellába, tehát 15×15-nél
-140×140, 21×21-nél 200×200.
+**Forward mapping, not inverse.** Vertices of a densely tessellated grid store offsets, while texture coordinates remain on a regular grid. Rasterization performs interpolation, keeping the shader trivial. Inverse mapping would require iteratively inverting the offset field. Subdivision adapts dynamically to grid size: at least 10 subdivisions per grid cell, translating to 140×140 for 15×15 and 200×200 for 21×21.
 
-**A spline-ok előre ki vannak számolva.** Ez mérés miatt lett így: ha az
-interpoláció minden mintavételnél újraszámolja az érintőket, egy `Eval` O(n²), és
-a GPU-rács újraépítése 21×21-nél 118 ms-ot vitt el - húzás közben ~8 fps. Mivel a
-leképezés szeparálható, a soronkénti görbék egyszer épülnek fel, és az egész
-újraépítés O(stride² · n²) helyett O(stride · (stride + n)) lett: 118 ms → 0,93 ms.
+**Splines are precalculated.** This decision stemmed from profiling: if tangents were recalculated on every sample during interpolation, `Eval` scaled at O(n²), requiring 118 ms to rebuild the GPU grid at 21×21 (~8 FPS during drag operations). Since mapping is separable, per-row curves are built once, reducing total rebuild time from O(stride² · n²) to O(stride · (stride + n)): dropping from 118 ms down to 0.93 ms.
 
-**Kikapcsolva sem skálázódik a kép.** Ilyenkor a rács identitás, minden csúcs a
-saját texelére esik, a bilineáris minta pontos - vagyis az `Ctrl+Alt+B`
-összehasonlítás tényleg csak a korrekciót kapcsolgatja, nem egy újraskálázást is.
+**Identity scaling when disabled.** When turned off, the grid represents identity mapping; every vertex maps precisely to its corresponding texel, and bilinear sampling evaluates to exact pixels. Consequently, toggling `Ctrl+Alt+B` truly compares correction versus non-correction without introducing resampling artifacts.
 
-**Monoton köbös, nem Catmull-Rom.** Ez mérés alapján változott: Catmull-Rommal
-egy 6 px-es felső korrekció ~0,45 px ellentétes irányú elhajlást okozott a
-képernyő harmadánál - pont a már jó alsó részen. A Fritsch-Carlson-féle monoton
-köbös Hermite-interpoláció ugyanúgy pontosan átmegy minden kontrollponton (6 px-et
-húzol, 6 px-et mozdul), de sosem lő túl: amit nem mozgattál, az pontosan a helyén
-marad. A `tests/test_warp.cpp` ezt méri.
+**Monotonic cubic vs. Catmull-Rom.** Switched based on measurement: with Catmull-Rom, a 6 px top correction caused an opposing ~0.45 px deflection near the upper third of the screen — distorting areas that were already correct. Fritsch-Carlson monotonic cubic Hermite interpolation passes through all control points precisely (dragging 6 px moves exactly 6 px) without overshooting: unadjusted points remain fixed in place. Evaluated in `tests/test_warp.cpp`.
 
 ---
 
-## Tervek
+## Roadmap
 
-- Több monitor egyidejű korrekciója (most az elsődlegest kezeli).
-- Telepítő (`installer/crtbender.iss`, Inno Setup - vázként már itt van).
-- Csatornánkénti warp = szoftveres konvergencia-korrekció (külön rács R/G/B-re).
-- Ugyanennek a profilnak az exportálása ReShade shaderré, hogy exkluzív teljes
-  képernyős játékokban is működjön, extra késleltetés nélkül.
-- Kamerás automatikus kalibráció: pontrács kifényképezése, OpenCV-vel megoldott
-  inverz warp.
+- Multi-monitor support (currently targets primary display).
+- Installer (`installer/crtbender.iss`, Inno Setup skeleton included).
+- Per-channel warping = software convergence correction (independent R/G/B grids).
+- Profile export to ReShade shader format for exclusive fullscreen games with zero added latency.
+- Camera-based automated calibration: photographing a point grid and computing inverse warp via OpenCV.
 
-## A projektről
+## About the Project
 
-- Készítette: **SubCoderHUN**
-- Projekt oldala: <https://github.com/SubCoderHUN/CRTBender>
+- Created by: **SubCoderHUN**
+- Project Page: <https://github.com/SubCoderHUN/CRTBender>
 
-A programon belül a tálcamenü *Projekt oldala (GitHub)* és *A CRTBender
-névjegye...* pontja, valamint a kalibráló ablak *GitHub* gombja is ide vezet.
+Within the application, the tray menu options *Project Page (GitHub)* and *About CRTBender...*, as well as the *GitHub* button in the calibration window, lead here.
 
-## Licenc
+## License
 
-Lásd a [LICENSE](LICENSE) fájlt.
+See the [LICENSE](LICENSE) file.
