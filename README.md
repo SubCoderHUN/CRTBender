@@ -103,19 +103,6 @@ If you pull the top of the image downward, a black strip would theoretically rem
 
 ---
 
-## Troubleshooting
-
-**Panic Button: `Ctrl+Alt+B`.** Disables correction and restores the standard desktop image at any time. `Esc` exits the test pattern.
-
-**Black screen when enabled.** Open the log file (Tray menu → *Open Log*) and look for the `Capture check:` line. This indicates whether the program receives video frames at all:
-
-- `... - good` → capture is functioning properly, meaning rendering is at fault. Try changing `present_mode = flip` in the configuration file (default is `bitblt`), then restart the application.
-- `... - BLANK` → capture yields blank images. In this case, the program **does not render the overlay** to avoid covering the desktop, and indicates this state in the tray menu. `Present model:` and `Source texture` lines show which mode is running.
-
-**Cannot click on anything.** This was a bug in version 1.0 (missing `WS_EX_LAYERED` on the overlay window); now fixed. If it occurs, the application checks on startup whether the window properly passes through mouse clicks; if not, correction will not start, and the log records `Overlay is not click-through`.
-
----
-
 ## Configuration File
 
 `%APPDATA%\CRTBender\crtbender.cfg` - plain text, editable manually.
