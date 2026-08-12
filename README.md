@@ -4,7 +4,8 @@ Software geometry correction for CRT monitors on Windows. Your monitor bends the
 picture; CRTBender bends it back before it gets there. No hardware mods, no
 service menu.
 
-<img width="1151" height="835" alt="bender" src="https://github.com/user-attachments/assets/22555c8a-007c-45b9-b8e5-3dc6b8373db8" />
+<img width="1151" height="835" alt="image" src="https://github.com/user-attachments/assets/b56b0f8d-3ec3-4c9d-a08e-850ca03952bc" />
+
 
 ## Features
 
