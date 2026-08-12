@@ -67,5 +67,15 @@ set_target_properties(CRTBender PROPERTIES OUTPUT_NAME "CRTBender")
 add_executable(warp_tests EXCLUDE_FROM_ALL tests/test_warp.cpp src/warpmesh.cpp)
 target_include_directories(warp_tests PRIVATE src)
 
+# The string tables are plain data, so they can be checked off-Windows too.
+#   cmake --build . --target i18n_tests && ./i18n_tests
+add_executable(i18n_tests EXCLUDE_FROM_ALL tests/test_i18n.cpp src/i18n.cpp)
+target_include_directories(i18n_tests PRIVATE src)
+if(MSVC)
+    target_compile_options(i18n_tests PRIVATE /utf-8)
+else()
+    target_compile_options(i18n_tests PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
+endif()
+
 install(TARGETS CRTBender RUNTIME DESTINATION .)
 install(FILES README.md DESTINATION .)

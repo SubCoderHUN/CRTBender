@@ -254,7 +254,7 @@ void EditorWindow::RelabelControls() {
     for (size_t i = 0; i < std::size(kGridSizes); ++i) {
         wchar_t buf[64];
         if (kGridSizes[i] == WarpMesh::kDefaultSize)
-            swprintf(buf, std::size(buf), L"%d x %d  (%s)",
+            swprintf(buf, std::size(buf), L"%d x %d  (%ls)",
                      kGridSizes[i], kGridSizes[i], T(Str::EdGridRecommended));
         else
             swprintf(buf, std::size(buf), L"%d x %d", kGridSizes[i], kGridSizes[i]);
@@ -496,9 +496,12 @@ void EditorWindow::UpdateStatusText() {
                  o.dy * static_cast<float>(mode.height),
                  o.dx * static_cast<float>(mode.width));
     } else {
-        swprintf(line, std::size(line), L"%s", T(Str::StatusNoSelection));
+        swprintf(line, std::size(line), L"%ls", T(Str::StatusNoSelection));
     }
     text += line;
+
+    if (p.overscan > 1.001f)
+        text += std::wstring(T(Str::EdOverscanHint)) + L"\r\n\r\n";
 
     const std::wstring err = host_->EngineStatus();
     if (!err.empty()) text += std::wstring(T(Str::StatusWarning)) + err + L"\r\n\r\n";

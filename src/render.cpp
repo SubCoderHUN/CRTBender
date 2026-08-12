@@ -512,7 +512,7 @@ bool WarpEngine::Impl::CaptureIsBlank() {
     if (!blank || !loggedBlankWarning) {
         wchar_t msg[224];
         swprintf(msg, std::size(msg),
-                 L"Capture check: %u/%u non-black pixels across 3 patches of a %ux%u frame - %s",
+                 L"Capture check: %u/%u non-black pixels across 3 patches of a %ux%u frame - %ls",
                  nonBlack, 3u * kPatch * kPatch, srcWidth, srcHeight,
                  blank ? L"BLANK, the problem is upstream of the warp; overlay stays hidden"
                        : L"good");

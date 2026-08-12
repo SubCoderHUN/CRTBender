@@ -98,6 +98,8 @@ enum class Str {
 void        SetLanguage(Lang lang);
 Lang        GetLanguage();
 const wchar_t* T(Str id);
+// Explicit-language lookup. Used by the string table tests.
+const wchar_t* T(Lang lang, Str id);
 
 // Narrow (UTF-8) variant, for the config file writer.
 const char* T8(Str id);

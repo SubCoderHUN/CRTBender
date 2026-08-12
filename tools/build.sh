@@ -49,5 +49,11 @@ g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
     -o "$WORK/warp_tests" "$ROOT/tests/test_warp.cpp" "$ROOT/src/warpmesh.cpp"
 "$WORK/warp_tests" | tail -1
 
+echo "==> running the string table tests"
+g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
+    -finput-charset=UTF-8 -fexec-charset=UTF-8 \
+    -o "$WORK/i18n_tests" "$ROOT/tests/test_i18n.cpp" "$ROOT/src/i18n.cpp"
+"$WORK/i18n_tests" | tail -1
+
 echo
 ls -lh "$OUT/CRTBender.exe"

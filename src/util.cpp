@@ -97,7 +97,7 @@ void LogLine(const std::wstring& msg) {
 
 void LogHr(const wchar_t* what, HRESULT hr) {
     wchar_t buf[256];
-    swprintf(buf, std::size(buf), L"%s failed: hr=0x%08lX", what, static_cast<unsigned long>(hr));
+    swprintf(buf, std::size(buf), L"%ls failed: hr=0x%08lX", what, static_cast<unsigned long>(hr));
     LogLine(buf);
 }
 

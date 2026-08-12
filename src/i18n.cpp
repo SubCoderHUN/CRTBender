@@ -22,8 +22,8 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
     L"Project page (GitHub)",
     L"About CRTBender...",
     L"Exit",
-    L"CRTBender - correction on\n%s",
-    L"CRTBender - correction off\n%s",
+    L"CRTBender - correction on\n%ls",
+    L"CRTBender - correction off\n%ls",
 
     // Editor window
     L"CRTBender - geometry calibration",
@@ -55,11 +55,11 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
     L"Drag the points  |  Arrows: fine tuning (Shift = 1 px, Ctrl = 0.05 px)  |  "
     L"Double-click a point to reset it  |  Ctrl+Z: undo  |  Padlock: lock a row  |  "
     L"Esc: test pattern off",
-    L"CRTBender %s  -  by %s",
+    L"CRTBender %ls  -  by %ls",
 
     // Editor status panel
-    L"Active profile:  %s\r\nGrid:  %d x %d\r\n\r\n",
-    L"Selected point:  row %d / column %d%s\r\n"
+    L"Active profile:  %ls\r\nGrid:  %d x %d\r\n\r\n",
+    L"Selected point:  row %d / column %d%ls\r\n"
     L"   vertical:    %+.2f px\r\n"
     L"   horizontal:  %+.2f px\r\n\r\n",
     L"   [ROW LOCKED]",
@@ -70,10 +70,10 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
     // Dialogs
     L"Could not change the start-with-Windows setting. See the log file for details.",
     L"About CRTBender",
-    L"CRTBender %s\r\n"
+    L"CRTBender %ls\r\n"
     L"Software geometry correction for CRT monitors.\r\n\r\n"
-    L"Author: %s\r\n"
-    L"%s\r\n\r\n"
+    L"Author: %ls\r\n"
+    L"%ls\r\n\r\n"
     L"Open the project page in your browser?",
 
     // Engine errors
@@ -115,8 +115,8 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
     L"Projekt oldala (GitHub)",
     L"A CRTBender névjegye...",
     L"Kilépés",
-    L"CRTBender - korrekció bekapcsolva\n%s",
-    L"CRTBender - korrekció kikapcsolva\n%s",
+    L"CRTBender - korrekció bekapcsolva\n%ls",
+    L"CRTBender - korrekció kikapcsolva\n%ls",
 
     // Editor window
     L"CRTBender - geometria kalibrálás",
@@ -148,11 +148,11 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
     L"Húzd a pontokat  |  Nyilak: finomhangolás (Shift = 1 px, Ctrl = 0,05 px)  |  "
     L"Dupla kattintás: a pont nullázása  |  Ctrl+Z: visszavonás  |  Lakat: sor zárolása  |  "
     L"Esc: tesztminta ki",
-    L"CRTBender %s  -  készítette: %s",
+    L"CRTBender %ls  -  készítette: %ls",
 
     // Editor status panel
-    L"Aktív profil:  %s\r\nRács:  %d x %d\r\n\r\n",
-    L"Kijelölt pont:  %d. sor / %d. oszlop%s\r\n"
+    L"Aktív profil:  %ls\r\nRács:  %d x %d\r\n\r\n",
+    L"Kijelölt pont:  %d. sor / %d. oszlop%ls\r\n"
     L"   függőleges:  %+.2f px\r\n"
     L"   vízszintes:  %+.2f px\r\n\r\n",
     L"   [A SOR ZÁROLVA]",
@@ -163,10 +163,10 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
     // Dialogs
     L"Az automatikus indulás beállítása nem sikerült. Részletek a naplófájlban.",
     L"A CRTBender névjegye",
-    L"CRTBender %s\r\n"
+    L"CRTBender %ls\r\n"
     L"Szoftveres geometria-korrekció CRT monitorokhoz.\r\n\r\n"
-    L"Készítette: %s\r\n"
-    L"%s\r\n\r\n"
+    L"Készítette: %ls\r\n"
+    L"%ls\r\n\r\n"
     L"Megnyitod a projekt oldalát a böngészőben?",
 
     // Engine errors
@@ -229,6 +229,12 @@ const wchar_t* T(Str id) {
     const int index = static_cast<int>(id);
     if (index < 0 || index >= static_cast<int>(Str::Count)) return L"";
     return g_lang == Lang::Hungarian ? kHungarian[index] : kEnglish[index];
+}
+
+const wchar_t* T(Lang lang, Str id) {
+    const int index = static_cast<int>(id);
+    if (index < 0 || index >= static_cast<int>(Str::Count)) return L"";
+    return lang == Lang::Hungarian ? kHungarian[index] : kEnglish[index];
 }
 
 const char* T8(Str id) {
