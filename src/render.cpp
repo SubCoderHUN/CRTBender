@@ -23,13 +23,20 @@ namespace {
 
 constexpr const wchar_t* kOverlayClass = L"CRTBenderOverlayWindow";
 constexpr UINT kTimerTopmost = 1;
+constexpr DWORD kCaptureWatchdogMs = 100;
+
+enum class CaptureProbeResult {
+    Good,
+    Blank,
+    Failed,
+};
 
 struct alignas(16) WarpConstants {
     float resX, resY, cellsX, cellsY;
     float lineHalfW, borderW, patternOpacity, patternSolid;
     float gridR, gridG, gridB, gridA;
     float borderR, borderG, borderB, borderA;
-    float filterMode, pad0, pad1, pad2;
+    float filterMode, convergence, pad0, pad1;
 };
 static_assert(sizeof(WarpConstants) % 16 == 0, "cbuffer must be 16-byte aligned");
 
@@ -75,6 +82,7 @@ struct WarpEngine::Impl {
     ComPtr<IDXGIOutputDuplication>   dupl;
     ComPtr<ID3D11Texture2D>          srcTex;
     ComPtr<ID3D11ShaderResourceView> srcSrv;
+    ComPtr<ID3D11Texture2D>          captureProbe;
     ComPtr<ID3D11VertexShader>       vs;
     ComPtr<ID3D11PixelShader>        ps;
     ComPtr<ID3D11InputLayout>        layout;
@@ -90,6 +98,7 @@ struct WarpEngine::Impl {
 
     bool needReinit   = true;
     bool visible      = false;
+    bool prepared     = false;
     bool haveFrame    = false;
     bool forceDraw    = true;
     bool gridDirty    = true;
@@ -101,8 +110,10 @@ struct WarpEngine::Impl {
 
     // Until a frame with actual content shows up, the overlay stays hidden: a
     // full-screen black sheet over the desktop is far worse than no correction.
-    bool  captureConfirmed  = false;
-    DWORD lastCaptureCheck  = 0;
+    int   duplicationFailures = 0;
+    bool  captureConfirmed   = false;
+    DWORD lastCaptureCheck   = 0;
+    DWORD blankSince         = 0;
     bool  loggedBlankWarning = false;
 
     RenderState             state;
@@ -115,7 +126,7 @@ struct WarpEngine::Impl {
     // Reads a few pixels back from the captured desktop. Answers the one
     // question a black screen leaves open: did we capture nothing, or capture
     // something and fail to draw it?
-    bool CaptureIsBlank();
+    CaptureProbeResult ProbeCapture();
 
     bool CreateOverlayWindow(HINSTANCE inst);
     bool InitGraphics();
@@ -123,8 +134,13 @@ struct WarpEngine::Impl {
     bool EnsureDuplication();
     bool EnsureGridBuffers();
     void UploadGrid();
-    void Draw();
-    void SetVisible(bool show);
+    // False means the frame did not reach a usable swap chain. Callers must
+    // keep the full-screen overlay hidden in that case.
+    bool Draw();
+    // Makes the HWND presentable while keeping it globally transparent. This
+    // avoids DXGI_STATUS_OCCLUDED without exposing an unpresented back buffer.
+    bool PreparePresent();
+    bool SetVisible(bool show);
 };
 
 // ---------------------------------------------------------------------------
@@ -195,31 +211,32 @@ bool WarpEngine::Impl::CreateOverlayWindow(HINSTANCE inst) {
     }
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
-    // A layered window stays invisible until its attributes are set. Alpha 255:
-    // the overlay replaces the desktop image rather than blending with it.
-    if (!SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)) {
-        LogLine(L"SetLayeredWindowAttributes failed");
+    auto abandon = [this](const wchar_t* why) {
+        LogLine(why);
+        DestroyWindow(hwnd);
+        hwnd = nullptr;
         return false;
-    }
+    };
+
+    // Keep the window globally transparent until a captured frame has passed
+    // validation and Present has succeeded. It is shown in this state just
+    // before Present so DXGI does not treat the hidden HWND as occluded.
+    if (!SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA))
+        return abandon(L"SetLayeredWindowAttributes failed");
 
     // Refuse to run unless both flags really stuck. Getting this wrong locks the
     // user out of their own mouse, so it is worth checking rather than assuming.
     const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    if (!(exStyle & WS_EX_LAYERED) || !(exStyle & WS_EX_TRANSPARENT)) {
-        LogLine(L"Overlay is not click-through (WS_EX_LAYERED|WS_EX_TRANSPARENT missing)");
-        return false;
-    }
+    if (!(exStyle & WS_EX_LAYERED) || !(exStyle & WS_EX_TRANSPARENT))
+        return abandon(L"Overlay is not click-through (WS_EX_LAYERED|WS_EX_TRANSPARENT missing)");
 
     // Without this the overlay captures itself and the picture recurses.
-    if (!SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)) {
-        LogLine(L"SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) failed");
-        return false;
-    }
+    if (!SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE))
+        return abandon(L"SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) failed");
+
     DWORD affinity = 0;
-    if (!GetWindowDisplayAffinity(hwnd, &affinity) || affinity != WDA_EXCLUDEFROMCAPTURE) {
-        LogLine(L"Capture exclusion was not honoured by the system");
-        return false;
-    }
+    if (!GetWindowDisplayAffinity(hwnd, &affinity) || affinity != WDA_EXCLUDEFROMCAPTURE)
+        return abandon(L"Capture exclusion was not honoured by the system");
 
     SetTimer(hwnd, kTimerTopmost, 2000, nullptr);
     return true;
@@ -228,6 +245,7 @@ bool WarpEngine::Impl::CreateOverlayWindow(HINSTANCE inst) {
 void WarpEngine::Impl::ShutdownGraphics() {
     if (dupl) dupl->ReleaseFrame();
     dupl.Reset();
+    captureProbe.Reset();
     srcSrv.Reset();
     srcTex.Reset();
     rtv.Reset();
@@ -253,9 +271,11 @@ void WarpEngine::Impl::ShutdownGraphics() {
     srcWidth     = 0;
     srcHeight    = 0;
 
-    captureConfirmed   = false;
-    lastCaptureCheck   = 0;
-    loggedBlankWarning = false;
+    captureConfirmed    = false;
+    duplicationFailures = 0;
+    lastCaptureCheck    = 0;
+    blankSince          = 0;
+    loggedBlankWarning  = false;
 }
 
 bool WarpEngine::Impl::InitGraphics() {
@@ -265,10 +285,11 @@ bool WarpEngine::Impl::InitGraphics() {
     HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), factory.PutVoid());
     if (FAILED(hr)) { LogHr(L"CreateDXGIFactory1", hr); return false; }
 
-    // Find the primary monitor's output and build the device on the adapter
-    // that actually drives it: duplication only works same-adapter.
+    // Find this engine's output and build the device on the adapter that
+    // actually drives it: duplication only works same-adapter.
     POINT origin{ 0, 0 };
     HMONITOR primary = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+    const std::wstring& wanted = owner ? owner->TargetDevice() : std::wstring();
 
     ComPtr<IDXGIAdapter1> chosenAdapter;
     DXGI_OUTPUT_DESC      outDesc{};
@@ -284,7 +305,12 @@ bool WarpEngine::Impl::InitGraphics() {
 
             DXGI_OUTPUT_DESC desc{};
             if (FAILED(output->GetDesc(&desc))) continue;
-            if (desc.Monitor != primary) continue;
+
+            // Match by GDI device name when we were given one, otherwise take
+            // whatever Windows currently calls the primary.
+            const bool matches = wanted.empty() ? (desc.Monitor == primary)
+                                                : (wanted == desc.DeviceName);
+            if (!matches) continue;
             if (FAILED(QueryTo(output.Get(), output1))) continue;
 
             chosenAdapter = adapter;
@@ -293,7 +319,11 @@ bool WarpEngine::Impl::InitGraphics() {
             break;
         }
     }
-    if (!found) { LogLine(L"Primary DXGI output not found"); return false; }
+    if (!found) {
+        LogLine(L"DXGI output not found for " +
+                (wanted.empty() ? std::wstring(L"the primary monitor") : wanted));
+        return false;
+    }
 
     deskRect = outDesc.DesktopCoordinates;
     width    = deskRect.right - deskRect.left;
@@ -374,6 +404,7 @@ bool WarpEngine::Impl::InitGraphics() {
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
     hr = device->CreateInputLayout(elements, static_cast<UINT>(std::size(elements)),
                                    vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(),
@@ -423,8 +454,10 @@ bool WarpEngine::Impl::EnsureSourceTexture(ID3D11Texture2D* frame) {
 
     if (srcTex && srcSrv && fd.Width == srcWidth && fd.Height == srcHeight) return true;
 
+    captureProbe.Reset();
     srcSrv.Reset();
     srcTex.Reset();
+    haveFrame = false;
 
     // The duplication texture cannot be sampled directly (no shader-resource
     // bind flag), so we keep a private copy. It has to match the source exactly:
@@ -447,6 +480,9 @@ bool WarpEngine::Impl::EnsureSourceTexture(ID3D11Texture2D* frame) {
 
     srcWidth  = fd.Width;
     srcHeight = fd.Height;
+    captureConfirmed = false;
+    lastCaptureCheck = 0;
+    blankSince = 0;
 
     wchar_t msg[192];
     swprintf(msg, std::size(msg),
@@ -456,25 +492,34 @@ bool WarpEngine::Impl::EnsureSourceTexture(ID3D11Texture2D* frame) {
     return true;
 }
 
-bool WarpEngine::Impl::CaptureIsBlank() {
-    if (!srcTex || !device || !ctx || srcWidth < 64 || srcHeight < 64) return false;
+CaptureProbeResult WarpEngine::Impl::ProbeCapture() {
+    // If the frame cannot be validated, fail closed and keep the overlay hidden.
+    if (!srcTex || !device || !ctx || srcWidth < 64 || srcHeight < 64) {
+        LogLine(L"Capture probe unavailable; rebuilding the graphics pipeline");
+        return CaptureProbeResult::Failed;
+    }
 
     D3D11_TEXTURE2D_DESC td{};
     srcTex->GetDesc(&td);
 
     constexpr UINT kPatch = 8;
-    D3D11_TEXTURE2D_DESC sd{};
-    sd.Width          = kPatch;
-    sd.Height         = kPatch;
-    sd.MipLevels      = 1;
-    sd.ArraySize      = 1;
-    sd.Format         = td.Format;
-    sd.SampleDesc     = { 1, 0 };
-    sd.Usage          = D3D11_USAGE_STAGING;
-    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-
-    ComPtr<ID3D11Texture2D> staging;
-    if (FAILED(device->CreateTexture2D(&sd, nullptr, staging.Put()))) return false;
+    constexpr UINT kPatchCount = 3;
+    if (!captureProbe) {
+        D3D11_TEXTURE2D_DESC sd{};
+        sd.Width          = kPatch;
+        sd.Height         = kPatch * kPatchCount;
+        sd.MipLevels      = 1;
+        sd.ArraySize      = 1;
+        sd.Format         = td.Format;
+        sd.SampleDesc     = { 1, 0 };
+        sd.Usage          = D3D11_USAGE_STAGING;
+        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        const HRESULT hr = device->CreateTexture2D(&sd, nullptr, captureProbe.Put());
+        if (FAILED(hr)) {
+            LogHr(L"CreateTexture2D(capture probe)", hr);
+            return CaptureProbeResult::Failed;
+        }
+    }
 
     // Three widely separated patches, so one dark window cannot make a healthy
     // capture look dead.
@@ -484,8 +529,8 @@ bool WarpEngine::Impl::CaptureIsBlank() {
         { td.Width * 3 / 4, td.Height * 3 / 4 },
     };
 
-    unsigned nonBlack = 0;
-    for (const auto& origin : origins) {
+    for (UINT i = 0; i < kPatchCount; ++i) {
+        const auto& origin = origins[i];
         D3D11_BOX box{};
         box.left   = origin[0];
         box.top    = origin[1];
@@ -494,32 +539,41 @@ bool WarpEngine::Impl::CaptureIsBlank() {
         box.back   = 1;
         if (box.right > td.Width || box.bottom > td.Height) continue;
 
-        ctx->CopySubresourceRegion(staging.Get(), 0, 0, 0, 0, srcTex.Get(), 0, &box);
-
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        if (FAILED(ctx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) continue;
-        const auto* base = static_cast<const unsigned char*>(mapped.pData);
-        for (UINT y = 0; y < kPatch; ++y) {
-            for (UINT x = 0; x < kPatch; ++x) {
-                const unsigned char* px = base + y * mapped.RowPitch + x * 4;
-                if (px[0] || px[1] || px[2]) ++nonBlack;
-            }
-        }
-        ctx->Unmap(staging.Get(), 0);
+        ctx->CopySubresourceRegion(captureProbe.Get(), 0, 0, i * kPatch, 0,
+                                   srcTex.Get(), 0, &box);
     }
 
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    const HRESULT mapHr = ctx->Map(captureProbe.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(mapHr)) {
+        LogHr(L"Map(capture probe)", mapHr);
+        return CaptureProbeResult::Failed;
+    }
+
+    unsigned nonBlack = 0;
+    const auto* base = static_cast<const unsigned char*>(mapped.pData);
+    for (UINT y = 0; y < kPatch * kPatchCount; ++y) {
+        for (UINT x = 0; x < kPatch; ++x) {
+            const unsigned char* px = base + y * mapped.RowPitch + x * 4;
+            if (px[0] || px[1] || px[2]) ++nonBlack;
+        }
+    }
+    ctx->Unmap(captureProbe.Get(), 0);
+
     const bool blank = nonBlack == 0;
-    if (!blank || !loggedBlankWarning) {
+    const bool logTransition = (blank && !loggedBlankWarning) ||
+                               (!blank && !captureConfirmed);
+    if (logTransition) {
         wchar_t msg[224];
         swprintf(msg, std::size(msg),
                  L"Capture check: %u/%u non-black pixels across 3 patches of a %ux%u frame - %ls",
-                 nonBlack, 3u * kPatch * kPatch, srcWidth, srcHeight,
-                 blank ? L"BLANK, the problem is upstream of the warp; overlay stays hidden"
+                 nonBlack, kPatchCount * kPatch * kPatch, srcWidth, srcHeight,
+                 blank ? L"BLANK, the problem is upstream of the warp"
                        : L"good");
         LogLine(msg);
-        if (blank) loggedBlankWarning = true;
     }
-    return blank;
+    loggedBlankWarning = blank;
+    return blank ? CaptureProbeResult::Blank : CaptureProbeResult::Good;
 }
 
 bool WarpEngine::Impl::EnsureDuplication() {
@@ -530,11 +584,23 @@ bool WarpEngine::Impl::EnsureDuplication() {
     if (FAILED(hr)) {
         dupl.Reset();
         // DXGI_ERROR_NOT_CURRENTLY_AVAILABLE means another process already holds
-        // the single allowed duplication, so we simply try again later.
-        LogHr(L"DuplicateOutput", hr);
+        // the single allowed duplication, so we simply try again later. Log the
+        // first few attempts only - this can persist for a whole gaming session.
+        if (duplicationFailures < 3) LogHr(L"DuplicateOutput", hr);
         return false;
     }
-    firstAcquire = true;
+
+    // A freshly created duplication can hand back one blank frame before the
+    // compositor catches up - this was seen on a real machine 200 ms before the
+    // same output went healthy. Presenting that frame paints the screen black,
+    // and because the overlay then covers the desktop nothing changes again, so
+    // no further frames arrive and the black stays. Every restart therefore has
+    // to re-prove itself, not just the very first one after a full init.
+    firstAcquire     = true;
+    haveFrame        = false;
+    captureConfirmed = false;
+    lastCaptureCheck = 0;
+    blankSince       = 0;
     return true;
 }
 
@@ -584,13 +650,22 @@ void WarpEngine::Impl::UploadGrid() {
     // A disabled correction still renders, as a strict pass-through: the mesh
     // is identity, so every vertex lands on its own texel and the bilinear tap
     // is exact. That keeps the A/B hotkey free of any re-scaling difference.
-    static const WarpMesh kIdentity;
-    const bool  bypass  = !state.enabled;
-    const auto& mesh    = bypass ? kIdentity : state.mesh;
-    const float zoom    = bypass ? 1.0f : state.overscan;
-    const float bleed   = bypass ? 0.0f : state.edgeBleed;
+    static const WarpMesh          kIdentityMesh;
+    static const GeometryParams    kNoGeometry;
+    static const ConvergenceParams kNoConvergence;
 
-    BuildWarpGrid(mesh, vbTess, zoom, bleed, verts);
+    const bool passthrough = !state.enabled;
+
+    WarpBuildParams params;
+    params.mesh        = passthrough ? &kIdentityMesh   : &state.mesh;
+    params.geometry    = passthrough ? &kNoGeometry     : &state.geometry;
+    params.convergence = passthrough ? &kNoConvergence  : &state.convergence;
+    params.tess        = vbTess;
+    params.overscan    = passthrough ? 1.0f : state.overscan;
+    params.edgeBleed   = passthrough ? 0.0f : state.edgeBleed;
+    params.aspect      = state.aspect;
+
+    BuildWarpGrid(params, verts);
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(ctx->Map(vb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
@@ -600,8 +675,12 @@ void WarpEngine::Impl::UploadGrid() {
     gridDirty = false;
 }
 
-void WarpEngine::Impl::Draw() {
-    if (!ctx || !rtv || !vb || !ib) return;
+bool WarpEngine::Impl::Draw() {
+    if (!device || !ctx || !swap || !rtv || !srcSrv || !vb || !ib ||
+        !cb || !vs || !ps || !layout || !raster || !smpLinear || !smpPoint) {
+        needReinit = true;
+        return false;
+    }
 
     WarpConstants c{};
     // Sampling maths works in source pixels; the source can legitimately differ
@@ -620,7 +699,8 @@ void WarpEngine::Impl::Draw() {
     c.patternSolid   = state.patternMode == 2 ? 1.0f : 0.0f;
     c.gridR = 0.35f; c.gridG = 1.00f; c.gridB = 0.55f; c.gridA = 1.0f;
     c.borderR = 1.0f; c.borderG = 0.35f; c.borderB = 0.35f; c.borderA = 1.0f;
-    c.filterMode = static_cast<float>(state.quality);
+    c.filterMode  = static_cast<float>(state.quality);
+    c.convergence = state.convergence.Any() ? 1.0f : 0.0f;
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(ctx->Map(cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -664,31 +744,81 @@ void WarpEngine::Impl::Draw() {
     ctx->DrawIndexed(indexCount, 0, 0);
 
     const HRESULT hr = swap->Present(1, 0);
-    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-        LogHr(L"Present", hr);
-        needReinit = true;
-    } else if (hr == DXGI_STATUS_OCCLUDED) {
-        // Succeeded, but nothing reached the screen - typically because the
-        // window was still hidden. Draw again rather than leaving whatever was
-        // in the surface (which is black) sitting there.
+    if (hr == S_OK) return true;
+
+    if (hr == DXGI_STATUS_OCCLUDED) {
+        // Never reveal a surface DXGI explicitly says was not presented.
         forceDraw = true;
+        return false;
     }
+
+    LogHr(L"Present", hr);
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        const HRESULT reason = device->GetDeviceRemovedReason();
+        if (FAILED(reason) && reason != hr) LogHr(L"D3D device removed reason", reason);
+    }
+
+    // Never leave a full-screen window up after any unexpected Present result.
+    // Rebuilding is safer than guessing which parts of the old device survived.
+    if (FAILED(hr)) {
+        needReinit = true;
+        return false;
+    }
+
+    // Unknown success/status codes do not prove that a frame reached the screen.
+    // Keep the overlay down and rebuild rather than risk displaying its black
+    // discard buffer.
+    needReinit = true;
+    return false;
 }
 
-void WarpEngine::Impl::SetVisible(bool show) {
-    if (!hwnd || visible == show) return;
-    visible = show;
-    if (show) {
-        ShowWindow(hwnd, SW_SHOWNA);
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        // The frame we just presented went to a hidden window and may have been
-        // dropped. Redraw straight away now that the window is really up.
-        forceDraw       = true;
-        lastPresentTick = 0;
-    } else {
+bool WarpEngine::Impl::PreparePresent() {
+    if (!hwnd) return false;
+    if (visible || prepared) return true;
+
+    if (!SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA)) {
+        LogLine(L"Could not make overlay transparent before Present");
         ShowWindow(hwnd, SW_HIDE);
+        return false;
     }
+
+    ShowWindow(hwnd, SW_SHOWNA);
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    prepared = true;
+    return true;
+}
+
+bool WarpEngine::Impl::SetVisible(bool show) {
+    if (!hwnd) return false;
+
+    if (!show) {
+        visible  = false;
+        prepared = false;
+        // Alpha zero closes even the tiny interval before ShowWindow processes
+        // the hide, so a failed Present can never leave a black sheet behind.
+        SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+        ShowWindow(hwnd, SW_HIDE);
+        return true;
+    }
+
+    if (visible) return true;
+    if (!prepared && !PreparePresent()) return false;
+    if (!SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)) {
+        LogLine(L"Could not reveal successfully presented overlay");
+        visible  = false;
+        prepared = false;
+        ShowWindow(hwnd, SW_HIDE);
+        return false;
+    }
+
+    visible  = true;
+    prepared = false;
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    forceDraw       = true;
+    lastPresentTick = 0;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -714,10 +844,11 @@ void WarpEngine::OnDisplayChanged() {
         PostMessageW(notifyWindow_, modeChangeMsg_, 0, 0);
 }
 
-bool WarpEngine::Start(HWND notifyWindow, UINT modeChangeMsg) {
+bool WarpEngine::Start(HWND notifyWindow, UINT modeChangeMsg, std::wstring targetDevice) {
     if (running_.load()) return true;
     notifyWindow_  = notifyWindow;
     modeChangeMsg_ = modeChangeMsg;
+    targetDevice_  = std::move(targetDevice);
     running_.store(true);
     thread_ = std::thread(&WarpEngine::ThreadMain, this);
     return true;
@@ -773,7 +904,8 @@ void WarpEngine::ThreadMain() {
             impl_->forceDraw = true;
         }
 
-        const bool want = impl_->state.enabled || impl_->state.patternMode != 0;
+        const bool want = (impl_->state.enabled || impl_->state.patternMode != 0) &&
+                          !impl_->state.bypass;
         if (!want) {
             if (impl_->visible) impl_->SetVisible(false);
             if (impl_->dupl) { impl_->dupl->ReleaseFrame(); impl_->dupl.Reset(); }
@@ -801,14 +933,19 @@ void WarpEngine::ThreadMain() {
         }
 
         if (!impl_->EnsureDuplication()) {
-            // Typically another process holds the duplication, or an exclusive
-            // fullscreen app owns the output. Back off and retry.
+            // Almost always an exclusive fullscreen application owning the
+            // output. Say so plainly rather than reporting a generic failure,
+            // and slow the retries down so the log does not fill up.
             impl_->SetVisible(false);
             active_.store(false);
-            SetError(T(Str::ErrDuplicationUnavailable));
-            MsgWaitForMultipleObjectsEx(0, nullptr, 500, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            ++impl_->duplicationFailures;
+            SetError(impl_->duplicationFailures >= 3 ? T(Str::StatusBypassFullscreen)
+                                                     : T(Str::ErrDuplicationUnavailable));
+            const DWORD wait = impl_->duplicationFailures >= 3 ? 1500 : 400;
+            MsgWaitForMultipleObjectsEx(0, nullptr, wait, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             continue;
         }
+        impl_->duplicationFailures = 0;
 
         if (!impl_->EnsureGridBuffers()) {
             impl_->needReinit = true;
@@ -826,6 +963,8 @@ void WarpEngine::ThreadMain() {
         } else if (FAILED(hr)) {
             LogHr(L"AcquireNextFrame", hr);
             impl_->dupl.Reset();
+            impl_->SetVisible(false);
+            active_.store(false);
             if (hr != DXGI_ERROR_ACCESS_LOST) {
                 impl_->needReinit = true;
                 nextRetryTick     = GetTickCount() + 500;
@@ -848,23 +987,52 @@ void WarpEngine::ThreadMain() {
             impl_->dupl->ReleaseFrame();
         }
 
-        // Never cover the desktop with a black sheet. Reading pixels back stalls
-        // the pipeline, so this only runs until one good frame has been seen,
-        // and at most five times a second while the capture looks dead.
-        if (impl_->haveFrame && !impl_->captureConfirmed) {
+        // Keep validating after initialization. Desktop Duplication can start
+        // returning black later without failing AcquireNextFrame; a periodic
+        // watchdog catches even a single static black frame without forcing a
+        // GPU readback at the monitor's full refresh rate.
+        if (impl_->haveFrame && impl_->state.patternMode != 0) {
+            // A test grid remains visibly recoverable even over a genuinely
+            // black desktop, and Esc always removes it. Do not misclassify that
+            // legitimate source as a pipeline failure.
+            impl_->captureConfirmed = true;
+            impl_->blankSince       = 0;
+            SetError(L"");
+        } else if (impl_->haveFrame) {
             const DWORD tick = GetTickCount();
-            if (tick - impl_->lastCaptureCheck >= 200 || impl_->lastCaptureCheck == 0) {
+            const bool checkDue = impl_->lastCaptureCheck == 0 ||
+                                  tick - impl_->lastCaptureCheck >= kCaptureWatchdogMs;
+            if (!checkDue && !impl_->captureConfirmed)
+                continue;
+
+            if (checkDue) {
                 impl_->lastCaptureCheck = tick;
-                if (impl_->CaptureIsBlank()) {
+                const CaptureProbeResult probe = impl_->ProbeCapture();
+                if (probe == CaptureProbeResult::Failed) {
+                    impl_->captureConfirmed = false;
                     impl_->SetVisible(false);
+                    impl_->needReinit = true;
+                    nextRetryTick = tick + 500;
                     active_.store(false);
-                    SetError(T(Str::ErrCaptureBlank));
+                    SetError(T(Str::ErrPipelineInit));
                     continue;
                 }
+                if (probe == CaptureProbeResult::Blank) {
+                    impl_->captureConfirmed = false;
+                    if (impl_->blankSince == 0) impl_->blankSince = tick;
+                    // Hiding immediately is the fail-safe: a brief correction
+                    // dropout is preferable to trapping the user behind black.
+                    impl_->SetVisible(false);
+                    active_.store(false);
+                    if (tick - impl_->blankSince > 2000) {
+                        SetError(T(Str::ErrCaptureBlank));
+                    }
+                    continue;
+                }
+
                 impl_->captureConfirmed = true;
+                impl_->blankSince       = 0;
                 SetError(L"");
-            } else {
-                continue;   // wait for the next check window
             }
         }
 
@@ -877,10 +1045,28 @@ void WarpEngine::ThreadMain() {
 
         if (impl_->haveFrame && (newFrame || impl_->forceDraw)) {
             impl_->UploadGrid();
-            impl_->Draw();
+            if (!impl_->visible && !impl_->PreparePresent()) {
+                impl_->SetVisible(false);
+                active_.store(false);
+                impl_->forceDraw = true;
+                MsgWaitForMultipleObjectsEx(0, nullptr, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                continue;
+            }
+            if (!impl_->Draw()) {
+                impl_->SetVisible(false);
+                active_.store(false);
+                impl_->forceDraw = true;
+                if (!impl_->needReinit)
+                    MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                continue;
+            }
             impl_->forceDraw      = false;
             impl_->lastPresentTick = GetTickCount();
-            impl_->SetVisible(true);
+            if (!impl_->SetVisible(true)) {
+                active_.store(false);
+                impl_->forceDraw = true;
+                continue;
+            }
             active_.store(true);
         }
     }

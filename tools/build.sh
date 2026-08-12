@@ -46,8 +46,19 @@ echo "==> stripping"
 
 echo "==> running the warp tests"
 g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
-    -o "$WORK/warp_tests" "$ROOT/tests/test_warp.cpp" "$ROOT/src/warpmesh.cpp"
+    -o "$WORK/warp_tests" "$ROOT/tests/test_warp.cpp" "$ROOT/src/warpmesh.cpp" "$ROOT/src/geometry.cpp"
 "$WORK/warp_tests" | tail -1
+
+echo "==> running the geometry tests"
+g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
+    -o "$WORK/geometry_tests" "$ROOT/tests/test_geometry.cpp" \
+    "$ROOT/src/geometry.cpp" "$ROOT/src/warpmesh.cpp"
+"$WORK/geometry_tests" | tail -1
+
+echo "==> running the config parser tests"
+g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
+    -o "$WORK/config_tests" "$ROOT/tests/test_config.cpp"
+"$WORK/config_tests" | tail -1
 
 echo "==> running the string table tests"
 g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \

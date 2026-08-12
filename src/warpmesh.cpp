@@ -1,4 +1,5 @@
 #include "warpmesh.h"
+#include "geometry.h"
 
 #include <algorithm>
 #include <cmath>
@@ -185,11 +186,14 @@ bool WarpMesh::AnyOffset() const {
 // Grid generation
 // ---------------------------------------------------------------------------
 
-void BuildWarpGrid(const WarpMesh& mesh, int tess, float overscan, float edgeBleed,
-                   std::vector<WarpVertex>& outVerts) {
-    tess = std::clamp(tess, 8, 512);
+void BuildWarpGrid(const WarpBuildParams& params, std::vector<WarpVertex>& outVerts) {
+    static const WarpMesh kEmptyMesh;
+    const WarpMesh& mesh = params.mesh ? *params.mesh : kEmptyMesh;
+
+    const int tess   = std::clamp(params.tess, 8, 512);
     const int stride = WarpGridStride(tess);
     const int n      = mesh.Size();
+    const float aspect = params.aspect > 0.0f ? params.aspect : 4.0f / 3.0f;
 
     outVerts.resize(static_cast<size_t>(stride) * stride);
 
@@ -199,8 +203,8 @@ void BuildWarpGrid(const WarpMesh& mesh, int tess, float overscan, float edgeBle
     std::vector<float> axisPos(static_cast<size_t>(stride));
     std::vector<float> axisTex(static_cast<size_t>(stride));
     for (int i = 0; i < stride; ++i) {
-        if (i == 0)                { axisPos[i] = -edgeBleed;       axisTex[i] = 0.0f; }
-        else if (i == stride - 1)  { axisPos[i] = 1.0f + edgeBleed; axisTex[i] = 1.0f; }
+        if (i == 0)                { axisPos[i] = -params.edgeBleed;       axisTex[i] = 0.0f; }
+        else if (i == stride - 1)  { axisPos[i] = 1.0f + params.edgeBleed; axisTex[i] = 1.0f; }
         else {
             const float t = static_cast<float>(i - 1) / static_cast<float>(tess);
             axisPos[i] = t;
@@ -237,15 +241,32 @@ void BuildWarpGrid(const WarpMesh& mesh, int tess, float overscan, float edgeBle
             float x = px         + verticalDx.At(tv);
             float y = axisPos[r] + verticalDy.At(tv);
 
+            // The parametric layer is analytic, so it is simply added on top of
+            // the interpolated lattice.
+            if (params.geometry) {
+                const Offset g = params.geometry->At(tu, tv, aspect);
+                x += g.dx;
+                y += g.dy;
+            }
+
             // Zoom about the screen centre.
-            x = 0.5f + (x - 0.5f) * overscan;
-            y = 0.5f + (y - 0.5f) * overscan;
+            x = 0.5f + (x - 0.5f) * params.overscan;
+            y = 0.5f + (y - 0.5f) * params.overscan;
 
             WarpVertex& out = outVerts[static_cast<size_t>(r) * stride + c];
             out.x = x * 2.0f - 1.0f;        // [0,1] -> NDC
             out.y = 1.0f - y * 2.0f;        // v grows downwards, NDC y upwards
             out.u = tu;
             out.v = tv;
+
+            if (params.convergence) {
+                Offset red, blue;
+                params.convergence->At(tu, tv, red, blue);
+                out.rdx = red.dx;  out.rdy = red.dy;
+                out.bdx = blue.dx; out.bdy = blue.dy;
+            } else {
+                out.rdx = out.rdy = out.bdx = out.bdy = 0.0f;
+            }
         }
     }
 }

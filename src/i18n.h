@@ -92,6 +92,28 @@ enum class Str {
     CfgLanguage,
     CfgProfilePoints,
 
+    // Tabs and monitor selection
+    TabGrid, TabGeometry, TabConvergence, TabImage, TabProgram,
+    EdMonitorLabel,
+
+    // Parametric geometry
+    GeoHPosition, GeoVPosition, GeoHSize, GeoVSize, GeoRotation,
+    GeoParallelogram, GeoTrapezoid, GeoPincushion, GeoPinBalance,
+    GeoHLinearity, GeoVLinearity, GeoTopBow, GeoBottomBow,
+    GeoReset, GeoHint,
+
+    // Convergence
+    ConvRedH, ConvRedV, ConvRedHEdge, ConvRedVEdge,
+    ConvBlueH, ConvBlueV, ConvBlueHEdge, ConvBlueVEdge,
+    ConvReset, ConvHint,
+
+    // Auto bypass
+    EdAutoBypass, StatusBypassProtected, StatusBypassFullscreen,
+
+    // Misc
+    StatusMonitor, ValuePixels, ValueDegrees,
+    CfgGeometry, CfgConvergence, CfgAutoBypass,
+
     Count,
 };
 
@@ -111,6 +133,6 @@ const wchar_t* LanguageDisplayName(Lang lang);   // always in its own language
 
 constexpr const wchar_t* kProjectUrl = L"https://github.com/SubCoderHUN/CRTBender";
 constexpr const wchar_t* kAuthor     = L"SubCoderHUN";
-constexpr const wchar_t* kVersion    = L"1.1.0";
+constexpr const wchar_t* kVersion    = L"2.0.0";
 
 } // namespace crtb

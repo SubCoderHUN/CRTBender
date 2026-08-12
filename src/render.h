@@ -17,6 +17,7 @@
 #pragma once
 
 #include "config.h"
+#include "geometry.h"
 #include "warpmesh.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -37,8 +38,16 @@ namespace crtb {
 
 // Everything the render thread needs, snapshotted under a lock on update.
 struct RenderState {
-    WarpMesh mesh;
+    WarpMesh          mesh;
+    GeometryParams    geometry;
+    ConvergenceParams convergence;
+
     bool  enabled        = true;
+    // Set by the auto-bypass watcher: the correction is wanted, but showing it
+    // right now would do more harm than good (protected video would come out
+    // black, an exclusive fullscreen app owns the output).
+    bool  bypass         = false;
+    float aspect         = 4.0f / 3.0f;
     float overscan       = 1.0f;
     float edgeBleed      = 0.0f;   // normalized units
     int   patternMode    = 0;      // 0 off, 1 over desktop, 2 on black
@@ -63,7 +72,9 @@ public:
 
     // notifyWindow receives modeChangeMsg (posted) when the display mode
     // changes, so the app can switch to the matching profile.
-    bool Start(HWND notifyWindow, UINT modeChangeMsg);
+    // targetDevice is a GDI display name such as \\.\DISPLAY1; empty means
+    // the primary monitor. One engine drives one monitor.
+    bool Start(HWND notifyWindow, UINT modeChangeMsg, std::wstring targetDevice);
     void Stop();
 
     // Thread-safe; applied on the next render iteration.
@@ -77,6 +88,8 @@ public:
 
     // Called from the overlay window procedure on WM_DISPLAYCHANGE.
     void OnDisplayChanged();
+
+    const std::wstring& TargetDevice() const { return targetDevice_; }
 
     void SetError(std::wstring message);
 
@@ -97,6 +110,7 @@ private:
 
     HWND                   notifyWindow_  = nullptr;
     UINT                   modeChangeMsg_ = 0;
+    std::wstring           targetDevice_;
 };
 
 } // namespace crtb

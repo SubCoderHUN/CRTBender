@@ -118,25 +118,46 @@ private:
     MonotoneSpline rowDy_[WarpMesh::kMaxSize];
 };
 
-// One tessellated vertex handed to the GPU: NDC position + source texcoord.
+struct GeometryParams;
+struct ConvergenceParams;
+
+// One tessellated vertex handed to the GPU.
+//
+// The convergence offsets ride along as vertex attributes rather than as a
+// lookup texture: the rasterizer already interpolates across this grid, so the
+// field comes for free and the pixel shader just adds them to its texcoord.
 struct WarpVertex {
-    float x, y;
-    float u, v;
+    float x, y;        // NDC position
+    float u, v;        // source texcoord (green / reference channel)
+    float rdx, rdy;    // red sampling offset, in texcoord units
+    float bdx, bdy;    // blue sampling offset
 };
 
-// Builds the render-ready triangle grid for a mesh.
-//
-//  tess      - interior subdivisions per axis (the grid gets tess+1 interior
-//              points, plus one bleed ring on each side).
-//  overscan  - uniform zoom about the screen centre, 1.0 = none. Values above
-//              1.0 magnify slightly so displaced content never runs short at
-//              the edges, at the cost of cropping a little of the desktop.
-//  edgeBleed - how far (in normalized units) the outer ring is pushed beyond
-//              the screen. The ring keeps its clamped texcoords, so it smears
-//              the outermost row/column of pixels outwards and fills whatever
-//              sliver the displacement would otherwise leave black.
-void BuildWarpGrid(const WarpMesh& mesh, int tess, float overscan, float edgeBleed,
-                   std::vector<WarpVertex>& outVerts);
+// Everything the grid builder needs. The final displacement at any point is
+// geometry(u,v) + mesh(u,v): the parametric layer handles the broad shape, the
+// lattice the rest, and neither destroys the other.
+struct WarpBuildParams {
+    const WarpMesh*          mesh        = nullptr;   // required
+    const GeometryParams*    geometry    = nullptr;   // optional
+    const ConvergenceParams* convergence = nullptr;   // optional
+
+    // Interior subdivisions per axis (the grid gets tess+1 interior points,
+    // plus one bleed ring on each side).
+    int   tess      = 96;
+    // Uniform zoom about the screen centre, 1.0 = none. Above 1.0 magnifies
+    // slightly so displaced content never runs short at the edges, at the cost
+    // of cropping a little of the desktop - and of resampling all of it.
+    float overscan  = 1.0f;
+    // How far (in normalized units) the outer ring is pushed beyond the screen.
+    // The ring keeps its clamped texcoords, so it smears the outermost
+    // row/column of pixels outwards and fills whatever sliver the displacement
+    // would otherwise leave black.
+    float edgeBleed = 0.0f;
+    // Width / height, so that parametric rotation stays a true rotation.
+    float aspect    = 4.0f / 3.0f;
+};
+
+void BuildWarpGrid(const WarpBuildParams& params, std::vector<WarpVertex>& outVerts);
 
 // Index buffer for the grid produced by BuildWarpGrid. Depends only on tess.
 void BuildWarpIndices(int tess, std::vector<unsigned int>& outIndices);

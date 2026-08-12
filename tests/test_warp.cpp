@@ -6,6 +6,7 @@
 //
 // or, from a configured build tree, `cmake --build . --target warp_tests`.
 #include "warpmesh.h"
+#include "geometry.h"
 
 #include <cmath>
 #include <cstdio>
@@ -79,7 +80,10 @@ int main() {
         WarpMesh identity;
         std::vector<WarpVertex> verts;
         const int tess = 32;
-        BuildWarpGrid(identity, tess, 1.0f, 0.0f, verts);
+        WarpBuildParams params;
+        params.mesh = &identity;
+        params.tess = tess;
+        BuildWarpGrid(params, verts);
 
         const int stride = WarpGridStride(tess);
         Check(static_cast<int>(verts.size()) == stride * stride, "vertex count matches the stride");
@@ -117,7 +121,11 @@ int main() {
 
         std::vector<WarpVertex> verts;
         const int tess = 64;
-        BuildWarpGrid(m, tess, 1.0f, bleed, verts);
+        WarpBuildParams params;
+        params.mesh      = &m;
+        params.tess      = tess;
+        params.edgeBleed = bleed;
+        BuildWarpGrid(params, verts);
         const int stride = WarpGridStride(tess);
 
         // Every column of the outer ring must sit above the top of the screen

@@ -4,6 +4,7 @@
 // opens the calibration window on demand.
 #include "autostart.h"
 #include "config.h"
+#include "display.h"
 #include "editor.h"
 #include "i18n.h"
 #include "render.h"
@@ -14,7 +15,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace crtb {
 namespace {
@@ -52,7 +55,8 @@ enum : int {
     HOTKEY_ESCAPE  = 4,
 };
 
-constexpr UINT kTimerPoll = 1;
+constexpr UINT kTimerPoll   = 1;   // monitor set / mode changes, engine health
+constexpr UINT kTimerBypass = 2;   // protected-content watcher, needs to be quick
 
 } // namespace
 
@@ -63,21 +67,26 @@ public:
     int Run(HINSTANCE inst, bool openEditor);
 
     // EditorHost
-    Settings&   HostSettings() override        { return config_.GetSettings(); }
-    Profile&    ActiveProfile() override       { return config_.ProfileFor(modeKey_); }
-    DisplayMode ActiveMode() const override    { return mode_; }
-    std::string ActiveModeKey() const override { return modeKey_; }
-    void        OnEditorChanged(bool persist) override;
-    bool        GetAutostart() const override  { return IsAutostartEnabled(); }
-    void        SetAutostart(bool enabled) override;
-    std::wstring EngineStatus() const override { return engine_.LastError(); }
+    Settings& HostSettings() override { return config_.GetSettings(); }
+
+    const std::vector<MonitorInfo>& Monitors() const override { return monitors_; }
+    int  SelectedMonitor() const override { return selected_; }
+    void SelectMonitor(int index) override;
+    const MonitorInfo& ActiveMonitor() const override;
+    Profile& ActiveProfile() override { return config_.ProfileFor(ActiveMonitor().ProfileKey()); }
+
+    void         OnEditorChanged(bool persist) override;
+    bool         GetAutostart() const override { return IsAutostartEnabled(); }
+    void         SetAutostart(bool enabled) override;
+    std::wstring EngineStatus() const override;
 
 private:
     static LRESULT CALLBACK WndProcThunk(HWND, UINT, WPARAM, LPARAM);
     LRESULT WndProc(HWND, UINT, WPARAM, LPARAM);
 
-    void PushState();
-    void RefreshMode(bool force);
+    void PushStates();
+    void RebuildMonitors(bool force);
+    void UpdateBypass();
     void AddTrayIcon();
     void RemoveTrayIcon();
     void UpdateTrayTooltip();
@@ -94,10 +103,17 @@ private:
     HINSTANCE    inst_ = nullptr;
     HWND         hwnd_ = nullptr;
     Config       config_;
-    WarpEngine   engine_;
     EditorWindow editor_;
-    DisplayMode  mode_;
-    std::string  modeKey_;
+
+    // One engine per monitor, in the same order as monitors_.
+    std::vector<MonitorInfo>                 monitors_;
+    std::vector<std::unique_ptr<WarpEngine>> engines_;
+    int          selected_ = 0;
+
+    // Auto-bypass state, driven by the fast timer.
+    bool         bypassActive_ = false;
+    bool         bypassProtected_ = false;
+
     UINT         taskbarCreatedMsg_ = 0;
     bool         warnedAboutError_  = false;
     bool         trayAdded_         = false;
@@ -106,34 +122,73 @@ private:
 
 // ---------------------------------------------------------------------------
 
-void App::PushState() {
-    Profile& profile = ActiveProfile();
+const MonitorInfo& App::ActiveMonitor() const {
+    static const MonitorInfo kFallback;
+    if (monitors_.empty()) return kFallback;
+    const int index = std::clamp(selected_, 0, static_cast<int>(monitors_.size()) - 1);
+    return monitors_[static_cast<size_t>(index)];
+}
+
+void App::SelectMonitor(int index) {
+    if (monitors_.empty()) return;
+    selected_ = std::clamp(index, 0, static_cast<int>(monitors_.size()) - 1);
+    UpdateTrayTooltip();
+}
+
+std::wstring App::EngineStatus() const {
+    // Report the selected monitor's engine first, then any other complaint, so
+    // a problem on a second screen is never silently swallowed.
+    const size_t index = static_cast<size_t>(
+        std::clamp(selected_, 0, static_cast<int>(engines_.size()) - 1));
+    if (index < engines_.size()) {
+        const std::wstring mine = engines_[index]->LastError();
+        if (!mine.empty()) return mine;
+    }
+    for (const auto& engine : engines_) {
+        const std::wstring other = engine->LastError();
+        if (!other.empty()) return other;
+    }
+    return {};
+}
+
+void App::PushStates() {
     const Settings& s = config_.GetSettings();
 
-    RenderState state;
-    state.mesh           = profile.mesh;
-    state.enabled        = s.enabled;
-    state.overscan       = profile.overscan;
-    state.edgeBleed      = EffectiveEdgeBleed(profile, mode_);
-    state.patternMode    = s.patternMode;
-    state.patternCells   = s.patternCells;
-    state.patternOpacity = static_cast<float>(s.patternOpacityPct) / 100.0f;
-    state.quality        = s.quality;
-    state.flipModel      = s.flipPresent;
+    for (size_t i = 0; i < engines_.size() && i < monitors_.size(); ++i) {
+        const MonitorInfo& monitor = monitors_[i];
+        Profile& profile = config_.ProfileFor(monitor.ProfileKey());
 
-    // The rasterizer interpolates linearly between tessellation vertices, so a
-    // dense lattice needs a dense grid to stay faithful to the spline. Keep at
-    // least ten subdivisions inside every lattice cell; the configured value is
-    // a floor, not a cap.
-    const int perCell = (profile.mesh.Size() - 1) * 10;
-    state.tessellation = std::clamp(std::max(s.tessellation, perCell), 16, 256);
+        RenderState state;
+        state.mesh           = profile.mesh;
+        state.geometry       = profile.geometry;
+        state.convergence    = profile.convergence;
+        state.enabled        = s.enabled;
+        state.bypass         = bypassActive_;
+        state.overscan       = profile.overscan;
+        state.edgeBleed      = EffectiveEdgeBleed(profile, monitor.width, monitor.height);
+        state.patternMode    = s.patternMode;
+        state.patternCells   = s.patternCells;
+        state.patternOpacity = static_cast<float>(s.patternOpacityPct) / 100.0f;
+        state.quality        = s.quality;
+        state.flipModel      = s.flipPresent;
+        state.aspect         = monitor.height > 0
+            ? static_cast<float>(monitor.width) / static_cast<float>(monitor.height)
+            : 4.0f / 3.0f;
 
-    engine_.Update(state);
+        // The rasterizer interpolates linearly between tessellation vertices, so
+        // a dense lattice needs a dense grid to stay faithful to the spline. Keep
+        // at least ten subdivisions inside every lattice cell; the configured
+        // value is a floor, not a cap.
+        const int perCell = (profile.mesh.Size() - 1) * 10;
+        state.tessellation = std::clamp(std::max(s.tessellation, perCell), 16, 256);
+
+        engines_[i]->Update(state);
+    }
 }
 
 void App::OnEditorChanged(bool persist) {
     SetLanguage(config_.GetSettings().language);
-    PushState();
+    PushStates();
     UpdateTrayTooltip();
     UpdateEscapeHotkey();
     if (persist) config_.Save();
@@ -163,20 +218,74 @@ void App::SetAutostart(bool enabled) {
     }
 }
 
-void App::RefreshMode(bool force) {
-    const DisplayMode current = QueryPrimaryDisplayMode();
-    if (!current.Valid()) return;
+void App::RebuildMonitors(bool force) {
+    std::vector<MonitorInfo> current = EnumerateMonitors();
+    if (current.empty()) return;
 
-    const std::string key = current.Key();
-    if (!force && key == modeKey_) return;
+    // Only tear engines down when the set of monitors or their modes actually
+    // changed; this runs on a timer.
+    bool changed = force || current.size() != monitors_.size();
+    for (size_t i = 0; !changed && i < current.size(); ++i) {
+        changed = current[i].ProfileKey() != monitors_[i].ProfileKey() ||
+                  current[i].deviceName  != monitors_[i].deviceName;
+    }
+    if (!changed) return;
 
-    mode_    = current;
-    modeKey_ = key;
-    LogLine(L"Active display mode: " + Widen(modeKey_));
+    LogLine(L"Monitor configuration changed, restarting engines");
+    for (const MonitorInfo& mon : current) {
+        wchar_t line[256];
+        swprintf(line, std::size(line), L"  %ls (%ls) %dx%d@%d%ls",
+                 mon.deviceName.c_str(), Widen(mon.monitorKey).c_str(),
+                 mon.width, mon.height, mon.refresh, mon.primary ? L" [primary]" : L"");
+        LogLine(line);
+    }
 
-    // Touch the profile so it exists, then push and refresh the UI.
-    config_.ProfileFor(modeKey_);
-    PushState();
+    for (auto& engine : engines_) engine->Stop();
+    engines_.clear();
+
+    monitors_ = std::move(current);
+    selected_ = std::clamp(selected_, 0, static_cast<int>(monitors_.size()) - 1);
+
+    for (const MonitorInfo& monitor : monitors_) {
+        // Profiles written before 1.2 had no monitor part in the key and only
+        // ever described the primary screen.
+        if (monitor.primary)
+            config_.AdoptLegacyProfile(monitor.ModeKey(), monitor.ProfileKey());
+        config_.ProfileFor(monitor.ProfileKey());
+
+        auto engine = std::make_unique<WarpEngine>();
+        engine->Start(hwnd_, WM_MODE_CHANGED, monitor.deviceName);
+        engines_.push_back(std::move(engine));
+    }
+
+    PushStates();
+    UpdateTrayTooltip();
+    if (editor_.IsOpen()) editor_.Refresh();
+}
+
+void App::UpdateBypass() {
+    const Settings& s = config_.GetSettings();
+
+    bool wantBypass = false;
+    if (s.autoBypass) {
+        // A window that excludes itself from capture - a DRM video player, or
+        // anything else using SetWindowDisplayAffinity - would come through the
+        // capture as solid black. Rather than blanking the user's screen, step
+        // aside for as long as it is in the foreground.
+        if (HWND foreground = GetForegroundWindow()) {
+            DWORD affinity = 0;
+            if (GetWindowDisplayAffinity(foreground, &affinity) && affinity != WDA_NONE)
+                wantBypass = true;
+        }
+    }
+
+    if (wantBypass == bypassActive_) return;
+
+    bypassActive_    = wantBypass;
+    bypassProtected_ = wantBypass;
+    LogLine(wantBypass ? L"Auto-bypass on: protected content in the foreground"
+                       : L"Auto-bypass off");
+    PushStates();
     UpdateTrayTooltip();
     if (editor_.IsOpen()) editor_.Refresh();
 }
@@ -224,7 +333,7 @@ void App::UpdateTrayTooltip() {
     nid.uFlags = NIF_TIP | NIF_SHOWTIP;
 
     const Settings& s = config_.GetSettings();
-    const std::wstring modeText = Widen(modeKey_);
+    const std::wstring modeText = Widen(ActiveMonitor().ModeKey());
     wchar_t tip[128];
     swprintf(tip, std::size(tip),
              s.enabled ? T(Str::TrayTipEnabled) : T(Str::TrayTipDisabled),
@@ -448,15 +557,20 @@ LRESULT App::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_MODE_CHANGED:
-        RefreshMode(false);
+        RebuildMonitors(false);
         return 0;
 
     case WM_TIMER:
+        if (wp == kTimerBypass) {
+            UpdateBypass();
+            return 0;
+        }
         if (wp == kTimerPoll) {
-            // Safety net: catches mode changes even if the overlay is down.
-            RefreshMode(false);
+            // Safety net: catches monitor and mode changes even when every
+            // overlay happens to be down.
+            RebuildMonitors(false);
 
-            const std::wstring error = engine_.LastError();
+            const std::wstring error = EngineStatus();
             if (!error.empty() && !warnedAboutError_) {
                 warnedAboutError_ = true;
                 ShowBalloon(L"CRTBender", error.c_str());
@@ -511,15 +625,16 @@ int App::Run(HINSTANCE inst, bool openEditor) {
 
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
 
-    RefreshMode(true);
+    RebuildMonitors(true);
     AddTrayIcon();
     RegisterHotkeys();
     UpdateEscapeHotkey();   // the config may already have the pattern switched on
 
-    engine_.Start(hwnd_, WM_MODE_CHANGED);
-    PushState();
+    PushStates();
 
     SetTimer(hwnd_, kTimerPoll, 2000, nullptr);
+    // Faster, because a black video window is noticed immediately.
+    SetTimer(hwnd_, kTimerBypass, 400, nullptr);
 
     if (openEditor) editor_.Open(inst_, this);
 
@@ -530,11 +645,13 @@ int App::Run(HINSTANCE inst, bool openEditor) {
     }
 
     KillTimer(hwnd_, kTimerPoll);
+    KillTimer(hwnd_, kTimerBypass);
     UnregisterHotKey(hwnd_, HOTKEY_TOGGLE);
     UnregisterHotKey(hwnd_, HOTKEY_PATTERN);
     UnregisterHotKey(hwnd_, HOTKEY_EDITOR);
     UnregisterHotKey(hwnd_, HOTKEY_ESCAPE);
-    engine_.Stop();
+    for (auto& engine : engines_) engine->Stop();
+    engines_.clear();
     config_.Save();
     RemoveTrayIcon();
 
@@ -562,7 +679,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
 
     INITCOMMONCONTROLSEX icc{};
     icc.dwSize = sizeof(icc);
-    icc.dwICC  = ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;
+    icc.dwICC  = ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_TAB_CLASSES;
     InitCommonControlsEx(&icc);
 
     const std::wstring args = cmdLine ? cmdLine : L"";

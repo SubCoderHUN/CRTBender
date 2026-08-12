@@ -98,6 +98,62 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
     L"bitblt or flip; bitblt is what keeps the overlay click-through",
     L"en or hu",
     L"control point offsets (dx,dy), row 0 is the top of the screen",
+
+    // Tabs and monitor selection
+    L"Grid",
+    L"Basic geometry",
+    L"Convergence",
+    L"Picture quality",
+    L"Program",
+    L"Monitor",
+
+    // Parametric geometry
+    L"Horizontal position",
+    L"Vertical position",
+    L"Width",
+    L"Height",
+    L"Rotation",
+    L"Parallelogram",
+    L"Trapezoid",
+    L"Pincushion",
+    L"Pincushion balance",
+    L"Horizontal linearity",
+    L"Vertical linearity",
+    L"Top edge bow",
+    L"Bottom edge bow",
+    L"Reset basic geometry",
+    L"These are the controls a monitor's own service menu offers. Start here: "
+    L"one slider usually removes what would otherwise take a dozen grid points. "
+    L"The grid is applied on top and stays untouched.",
+
+    // Convergence
+    L"Red - horizontal",
+    L"Red - vertical",
+    L"Red - horizontal at the edges",
+    L"Red - vertical at the edges",
+    L"Blue - horizontal",
+    L"Blue - vertical",
+    L"Blue - horizontal at the edges",
+    L"Blue - vertical at the edges",
+    L"Reset convergence",
+    L"Corrects coloured fringes on sharp edges. Green is the reference and does "
+    L"not move. Set the middle of the screen with the first two sliders, then use "
+    L"the edge sliders for what is left.",
+
+    // Auto bypass
+    L"Step aside automatically for protected video and fullscreen games",
+    L"Paused: protected content is in the foreground, so the capture would be "
+    L"black. The correction returns on its own.",
+    L"Paused: an exclusive fullscreen application is running. The correction "
+    L"returns on its own.",
+
+    // Misc
+    L"Monitor:  %ls\r\n",
+    L"%+.2f px",
+    L"%+.3f deg",
+    L"basic geometry, in fractions of the screen size",
+    L"convergence: where red and blue are sampled from, relative to green",
+    L"step aside for protected video and exclusive fullscreen",
 };
 
 const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
@@ -191,6 +247,62 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
     L"bitblt vagy flip; a bitblt tartja kattintás-átengedőnek az átfedést",
     L"en vagy hu",
     L"kontrollpont-eltolások (dx,dy), a 0. sor a képernyő teteje",
+
+    // Tabs and monitor selection
+    L"Rács",
+    L"Alapgeometria",
+    L"Konvergencia",
+    L"Képminőség",
+    L"Program",
+    L"Monitor",
+
+    // Parametric geometry
+    L"Vízszintes pozíció",
+    L"Függőleges pozíció",
+    L"Szélesség",
+    L"Magasság",
+    L"Elforgatás",
+    L"Paralelogramma",
+    L"Trapéz",
+    L"Párnatorzítás",
+    L"Párnatorzítás egyensúlya",
+    L"Vízszintes linearitás",
+    L"Függőleges linearitás",
+    L"Felső él íve",
+    L"Alsó él íve",
+    L"Alapgeometria nullázása",
+    L"Ezek ugyanazok a szabályzók, amiket a monitor szervizmenüje kínál. Érdemes "
+    L"innen indulni: egy csúszka általában elintézi azt, amihez különben egy tucat "
+    L"rácspontot kellene húzogatni. A rács ezek tetejére kerül, és érintetlen marad.",
+
+    // Convergence
+    L"Vörös - vízszintes",
+    L"Vörös - függőleges",
+    L"Vörös - vízszintes a széleken",
+    L"Vörös - függőleges a széleken",
+    L"Kék - vízszintes",
+    L"Kék - függőleges",
+    L"Kék - vízszintes a széleken",
+    L"Kék - függőleges a széleken",
+    L"Konvergencia nullázása",
+    L"A kontúrokon megjelenő színes szegélyt javítja. A zöld a viszonyítási alap, "
+    L"az nem mozdul. Előbb a képernyő közepét állítsd be az első két csúszkával, "
+    L"utána a maradékot a szélekre valókkal.",
+
+    // Auto bypass
+    L"Automatikus szünet védett videónál és teljes képernyős játéknál",
+    L"Szünetel: védett tartalom van előtérben, a rögzítés fekete képet adna. "
+    L"A korrekció magától visszatér.",
+    L"Szünetel: exkluzív teljes képernyős alkalmazás fut. A korrekció magától "
+    L"visszatér.",
+
+    // Misc
+    L"Monitor:  %ls\r\n",
+    L"%+.2f px",
+    L"%+.3f fok",
+    L"alapgeometria, a képernyőméret törtrészében",
+    L"konvergencia: honnan mintavételezzük a vöröset és a kéket a zöldhöz képest",
+    L"félreállás védett videónál és exkluzív teljes képernyőnél",
 };
 
 // UTF-8 mirrors for the config writer, rebuilt whenever the language changes.

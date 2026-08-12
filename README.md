@@ -1,41 +1,52 @@
 # CRTBender
 
-Software geometry correction for CRT monitors on Windows. Pre-distorts the desktop image via DXGI Desktop Duplication and Direct3D 11 so that after your CRT's physical distortion, the image ends up straight-no hardware mods or service menu tweaking required.
+Software geometry correction for CRT monitors on Windows. Your monitor bends the
+picture; CRTBender bends it back before it gets there. No hardware mods, no
+service menu.
 
 <img width="1151" height="835" alt="bender" src="https://github.com/user-attachments/assets/22555c8a-007c-45b9-b8e5-3dc6b8373db8" />
 
-
 ## Features
 
-- **System-wide:** Corrects the entire primary display in real time.
-- **Customizable Grid:** 15×15 default control grid (adjustable from 3×3 up to 21×21). Drag points to fix pincushioning, barrel distortion, trapezoids, or local sag.
-- **Monotonic Interpolation:** Uses Fritsch-Carlson monotonic cubic Hermite splines. Untouched grid points don't overshoot or "bleed" into good areas.
-- **Resolution/Hz Profiles:** CRT geometry changes with timings. CRTBender auto-switches profiles when display mode changes (e.g. `1600x1200@85` vs `1280x960@75`).
-- **Image Quality:** Uses anti-ringing Lanczos-3 filtering to keep text crisp. Untouched pixels remain 1:1 bit-exact.
-- **Hotkeys:**
-  - `Ctrl+Alt+B` - Toggle correction on/off (panic key / quick A-B test)
-  - `Ctrl+Alt+G` - Toggle built-in alignment grid / test pattern
-  - `Ctrl+Alt+E` - Open calibration window
-  - `Esc` - Hide test pattern
+- Corrects the whole picture, on every connected monitor, in real time.
+- Sliders for the usual things first: rotation, pincushion, trapezoid, size,
+  position, and separate top and bottom edge bows.
+- A 15x15 grid on top of that, for anything the sliders cannot reach.
+- Convergence correction, for coloured fringes on sharp edges.
+- Remembers a separate setting for every monitor and every resolution.
+- Built-in test grid to calibrate against.
+- English and Hungarian.
 
-## Known Limitations
+## Hotkeys
 
-- **Borderless Windowed Only:** Cannot draw over exclusive fullscreen games. (ReShade shader export is planned).
-- **Cursor Offset:** Hardware mouse cursor isn't warped to prevent software blur, so it may misalign slightly near heavy warping zones.
-- **Latency:** Adds ~1 frame of latency from desktop capture.
-- **DRM Content:** Netflix / DRM video renders black under Desktop Duplication (toggle off with `Ctrl+Alt+B`).
-
----
+- `Ctrl+Alt+B` - correction on/off. Also the panic key.
+- `Ctrl+Alt+G` - test grid on/off.
+- `Ctrl+Alt+E` - open the calibration window.
+- `Esc` - hide the test grid.
 
 ## Getting Started
 
-1. Download `CRTBender.exe` from releases or build it yourself.
-2. Run the executable (portable, saves settings to `%APPDATA%\CRTBender\crtbender.cfg`).
-3. Press `Ctrl+Alt+G` to bring up the test grid.
-4. Drag grid control points to straighten lines. Use arrow keys for fine adjustments (Shift = 1px, Ctrl = 0.05px). Double-click a point to reset it.
-5. Click **Save** or close the calibration window.
+1. Download `CRTBender.exe` and run it. It lives in the tray.
+2. Press `Ctrl+Alt+G` to show the test grid.
+3. On the **Basic geometry** tab, drag the sliders until the lines look straight.
+   This does most of the work.
+4. Use the **Grid** tab for whatever is left. Drag a point, or select one and
+   nudge it with the arrow keys.
+5. Press `Ctrl+Alt+B` a few times to compare before and after.
+6. Close the window. Everything is saved automatically.
 
----
+Double-click any slider or grid point to put it back to default, so an
+experiment is never a one-way trip.
+
+## Known Limitations
+
+- Cannot draw over exclusive fullscreen games. Borderless windowed works.
+- Netflix and other protected video would capture as black, so CRTBender steps
+  aside on its own while such a window is in front, then comes back.
+- The mouse cursor is not bent, so it can sit a pixel or two off in heavily
+  corrected areas.
+- Only the parts you actually bend get resampled. Everything you leave alone
+  stays pixel-exact.
 
 ## Building from Source
 
@@ -48,3 +59,8 @@ Software geometry correction for CRT monitors on Windows. Pre-distorts the deskt
 cmake -B build -A x64
 cmake --build build --config Release
 # Output: build\Release\CRTBender.exe
+```
+
+## About
+
+Made by SubCoderHUN - https://github.com/SubCoderHUN/CRTBender

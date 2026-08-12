@@ -1,4 +1,5 @@
 #include "config.h"
+#include "cfgvalue.h"
 #include "i18n.h"
 #include "util.h"
 
@@ -53,20 +54,11 @@ bool WriteWholeFile(const std::wstring& path, const std::string& data) {
     return ok != FALSE;
 }
 
-bool ParseBool(const std::string& v, bool fallback) {
-    const std::string s = Trim(v);
-    if (s == "1" || s == "true" || s == "yes" || s == "on")  return true;
-    if (s == "0" || s == "false" || s == "no" || s == "off") return false;
-    return fallback;
-}
-
-int ParseInt(const std::string& v, int fallback) {
-    try { return std::stoi(Trim(v)); } catch (...) { return fallback; }
-}
-
-float ParseFloat(const std::string& v, float fallback) {
-    try { return std::stof(Trim(v)); } catch (...) { return fallback; }
-}
+// Thin aliases; the real work (including stripping inline comments) lives in
+// cfgvalue.h so it can be unit tested without Windows.
+bool  ParseBool (const std::string& v, bool fallback)  { return ParseConfigBool(v, fallback); }
+int   ParseInt  (const std::string& v, int fallback)   { return ParseConfigInt(v, fallback); }
+float ParseFloat(const std::string& v, float fallback) { return ParseConfigFloat(v, fallback); }
 
 std::string Fmt(const char* format, ...) {
     char buf[512];
@@ -77,23 +69,51 @@ std::string Fmt(const char* format, ...) {
     return buf;
 }
 
+// Named tables so a parameter is declared once and both read and written.
+struct GeometryField { const char* name; float GeometryParams::* member; };
+constexpr GeometryField kGeometryFields[] = {
+    { "hposition",     &GeometryParams::hPosition },
+    { "vposition",     &GeometryParams::vPosition },
+    { "hsize",         &GeometryParams::hSize },
+    { "vsize",         &GeometryParams::vSize },
+    { "rotation",      &GeometryParams::rotation },
+    { "parallelogram", &GeometryParams::parallelogram },
+    { "trapezoid",     &GeometryParams::trapezoid },
+    { "pincushion",    &GeometryParams::pincushion },
+    { "pinbalance",    &GeometryParams::pinBalance },
+    { "hlinearity",    &GeometryParams::hLinearity },
+    { "vlinearity",    &GeometryParams::vLinearity },
+    { "topbow",        &GeometryParams::topBow },
+    { "bottombow",     &GeometryParams::bottomBow },
+};
+
+struct ConvergenceField { const char* name; float ConvergenceParams::* member; };
+constexpr ConvergenceField kConvergenceFields[] = {
+    { "rh",     &ConvergenceParams::rH },
+    { "rv",     &ConvergenceParams::rV },
+    { "rhedge", &ConvergenceParams::rHEdge },
+    { "rvedge", &ConvergenceParams::rVEdge },
+    { "bh",     &ConvergenceParams::bH },
+    { "bv",     &ConvergenceParams::bV },
+    { "bhedge", &ConvergenceParams::bHEdge },
+    { "bvedge", &ConvergenceParams::bVEdge },
+};
+
 } // namespace
 
-std::string DisplayMode::Key() const {
-    return Fmt("%dx%d@%d", width, height, refresh);
-}
-
-DisplayMode QueryPrimaryDisplayMode() {
-    DisplayMode m;
-    DEVMODEW dm{};
-    dm.dmSize = sizeof(dm);
-    // A null device name means "the primary display".
-    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) {
-        m.width   = static_cast<int>(dm.dmPelsWidth);
-        m.height  = static_cast<int>(dm.dmPelsHeight);
-        m.refresh = static_cast<int>(dm.dmDisplayFrequency);
-    }
-    return m;
+bool Profile::Touched() const {
+    // Compared against the defaults rather than against fixed literals, so that
+    // changing a default cannot silently make every profile look "touched".
+    static const Profile kDefault;
+    if (mesh.AnyOffset() || geometry.Any() || convergence.Any()) return true;
+    if (std::fabs(overscan - kDefault.overscan) > 1e-4f) return true;
+    if (autoBleed != kDefault.autoBleed) return true;
+    if (std::fabs(edgeBleedPx - kDefault.edgeBleedPx) > 1e-4f) return true;
+    // Row locks count as work: locking the bands that already look right is the
+    // first calibration step, and losing it would be infuriating.
+    for (int r = 0; r < mesh.Size(); ++r)
+        if (mesh.RowLocked(r)) return true;
+    return false;
 }
 
 void Config::ResolvePath() {
@@ -107,14 +127,29 @@ void Config::ResolvePath() {
     path_ = dir.empty() ? local : dir + L"\\" + kFileNameW;
 }
 
-bool Config::HasProfile(const std::string& modeKey) const {
-    return profiles_.find(modeKey) != profiles_.end();
+bool Config::HasProfile(const std::string& key) const {
+    return profiles_.find(key) != profiles_.end();
 }
 
-Profile& Config::ProfileFor(const std::string& modeKey) {
-    auto it = profiles_.find(modeKey);
+Profile& Config::ProfileFor(const std::string& key) {
+    auto it = profiles_.find(key);
     if (it != profiles_.end()) return it->second;
-    return profiles_.emplace(modeKey, Profile{}).first->second;
+    return profiles_.emplace(key, Profile{}).first->second;
+}
+
+bool Config::AdoptLegacyProfile(const std::string& modeKey, const std::string& profileKey) {
+    if (modeKey == profileKey) return false;
+
+    auto legacy = profiles_.find(modeKey);
+    if (legacy == profiles_.end() || !legacy->second.Touched()) return false;
+
+    auto existing = profiles_.find(profileKey);
+    if (existing != profiles_.end() && existing->second.Touched()) return false;
+
+    profiles_[profileKey] = legacy->second;
+    profiles_.erase(legacy);
+    LogLine(L"Migrated legacy profile " + Widen(modeKey) + L" to " + Widen(profileKey));
+    return true;
 }
 
 void Config::Load() {
@@ -157,12 +192,13 @@ void Config::Load() {
             else if (key == "mirror")          settings_.mirror        = ParseBool(val, settings_.mirror);
             else if (key == "free_move")       settings_.freeMove      = ParseBool(val, settings_.freeMove);
             else if (key == "hotkeys")         settings_.hotkeys       = ParseBool(val, settings_.hotkeys);
+            else if (key == "auto_bypass")     settings_.autoBypass    = ParseBool(val, settings_.autoBypass);
             // "bicubic" is the pre-1.1 spelling; keep reading it so an existing
             // config does not silently lose the setting.
             else if (key == "bicubic")         settings_.quality       = ParseBool(val, true) ? 1 : 0;
             else if (key == "quality")         settings_.quality       = std::clamp(ParseInt(val, 2), 0, 2);
-            else if (key == "language")        settings_.language      = LanguageFromTag(Trim(val).c_str());
-            else if (key == "present_mode")    settings_.flipPresent   = (Trim(val) == "flip");
+            else if (key == "language")        settings_.language      = LanguageFromTag(ConfigValue(val).c_str());
+            else if (key == "present_mode")    settings_.flipPresent   = (ConfigValue(val) == "flip");
             else if (key == "preview_gain")    settings_.previewGain   = std::clamp(ParseInt(val, 8), 1, 24);
             else if (key == "tessellation")    settings_.tessellation  = std::clamp(ParseInt(val, 96), 16, 256);
             else if (key == "pattern_cells")   settings_.patternCells  = std::clamp(ParseInt(val, 8), 2, 64);
@@ -172,10 +208,28 @@ void Config::Load() {
 
         if (!profile) continue;
 
-        if (key == "overscan") {
+        if (key.rfind("geo.", 0) == 0) {
+            const std::string name = key.substr(4);
+            for (const GeometryField& field : kGeometryFields) {
+                if (name == field.name) {
+                    profile->geometry.*(field.member) =
+                        std::clamp(ParseFloat(val, 0.0f), -0.5f, 0.5f);
+                    break;
+                }
+            }
+        } else if (key.rfind("conv.", 0) == 0) {
+            const std::string name = key.substr(5);
+            for (const ConvergenceField& field : kConvergenceFields) {
+                if (name == field.name) {
+                    profile->convergence.*(field.member) =
+                        std::clamp(ParseFloat(val, 0.0f), -0.05f, 0.05f);
+                    break;
+                }
+            }
+        } else if (key == "overscan") {
             profile->overscan = std::clamp(ParseFloat(val, 1.0f), 1.0f, 1.25f);
         } else if (key == "bleed") {
-            if (Trim(val) == "auto") {
+            if (ConfigValue(val) == "auto") {
                 profile->autoBleed = true;
             } else {
                 profile->autoBleed   = false;
@@ -184,7 +238,7 @@ void Config::Load() {
         } else if (key == "grid") {
             profile->mesh.Resize(ParseInt(val, WarpMesh::kDefaultSize));
         } else if (key == "locked") {
-            std::istringstream ls(val);
+            std::istringstream ls(ConfigValue(val));
             std::string tok;
             while (std::getline(ls, tok, ',')) {
                 const std::string t = Trim(tok);
@@ -236,6 +290,8 @@ bool Config::Save() const {
     out += Fmt("mirror          = %d       # %s\n", settings_.mirror ? 1 : 0, T8(Str::CfgMirror));
     out += Fmt("free_move       = %d       # %s\n", settings_.freeMove ? 1 : 0, T8(Str::CfgFreeMove));
     out += Fmt("hotkeys         = %d\n", settings_.hotkeys ? 1 : 0);
+    out += Fmt("auto_bypass     = %d       # %s\n", settings_.autoBypass ? 1 : 0,
+               T8(Str::CfgAutoBypass));
     out += Fmt("quality         = %d       # %s\n", settings_.quality, T8(Str::CfgQuality));
     out += Fmt("present_mode    = %-6s  # %s\n",
                settings_.flipPresent ? "flip" : "bitblt", T8(Str::CfgPresentMode));
@@ -246,13 +302,7 @@ bool Config::Save() const {
         const WarpMesh& mesh = profile.mesh;
 
         // Skip untouched auto-created profiles so the file stays readable.
-        // Row locks count as work: locking the rows that already look right is
-        // the first calibration step, and losing it would be infuriating.
-        bool anyLock = false;
-        for (int r = 0; r < mesh.Size(); ++r) anyLock = anyLock || mesh.RowLocked(r);
-
-        if (!mesh.AnyOffset() && !anyLock && profile.overscan <= 1.0001f && profile.autoBleed)
-            continue;
+        if (!profile.Touched()) continue;
 
         out += Fmt("\n[profile:%s]\n", key.c_str());
         out += Fmt("grid     = %d\n", mesh.Size());
@@ -267,6 +317,26 @@ bool Config::Save() const {
             locked += std::to_string(r);
         }
         if (!locked.empty()) out += Fmt("locked   = %s\n", locked.c_str());
+
+        if (profile.geometry.Any()) {
+            out += Fmt("# %s\n", T8(Str::CfgGeometry));
+            for (const GeometryField& field : kGeometryFields) {
+                const float value = profile.geometry.*(field.member);
+                if (std::fabs(value) > 1e-7f)
+                    out += Fmt("geo.%-14s = %+.6f\n", field.name, value);
+            }
+        }
+
+        if (profile.convergence.Any()) {
+            out += Fmt("# %s\n", T8(Str::CfgConvergence));
+            for (const ConvergenceField& field : kConvergenceFields) {
+                const float value = profile.convergence.*(field.member);
+                if (std::fabs(value) > 1e-7f)
+                    out += Fmt("conv.%-13s = %+.6f\n", field.name, value);
+            }
+        }
+
+        if (!mesh.AnyOffset()) continue;
 
         out += Fmt("# %s\n", T8(Str::CfgProfilePoints));
         for (int r = 0; r < mesh.Size(); ++r) {
@@ -294,15 +364,25 @@ bool Config::Save() const {
     return true;
 }
 
-float EffectiveEdgeBleed(const Profile& profile, const DisplayMode& mode) {
-    if (!profile.autoBleed) {
-        const float h = mode.height > 0 ? static_cast<float>(mode.height) : 1080.0f;
-        return profile.edgeBleedPx / h;
-    }
+float EffectiveEdgeBleed(const Profile& profile, int screenWidth, int screenHeight) {
+    const float height = screenHeight > 0 ? static_cast<float>(screenHeight) : 1080.0f;
+    if (!profile.autoBleed) return profile.edgeBleedPx / height;
 
-    float maxDx = 0.0f, maxDy = 0.0f;
-    profile.mesh.MaxMagnitude(maxDx, maxDy);
-    const float needed = std::max(maxDx, maxDy);
+    const float aspect = (screenWidth > 0 && screenHeight > 0)
+        ? static_cast<float>(screenWidth) / static_cast<float>(screenHeight)
+        : 4.0f / 3.0f;
+
+    float meshDx = 0.0f, meshDy = 0.0f;
+    profile.mesh.MaxMagnitude(meshDx, meshDy);
+
+    float geoDx = 0.0f, geoDy = 0.0f;
+    profile.geometry.MaxMagnitude(aspect, geoDx, geoDy);
+
+    float convDx = 0.0f, convDy = 0.0f;
+    profile.convergence.MaxMagnitude(convDx, convDy);
+
+    // Worst case the layers stack, so add rather than take the maximum.
+    const float needed = std::max(meshDx + geoDx + convDx, meshDy + geoDy + convDy);
 
     // Overscan already pulls the image outwards by (overscan-1)/2 per side.
     const float fromZoom = std::max(0.0f, (profile.overscan - 1.0f) * 0.5f);

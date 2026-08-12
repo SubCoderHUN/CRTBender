@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(CRTBender VERSION 1.0.0 LANGUAGES CXX)
+project(CRTBender VERSION 2.0.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "CRTBender is a Windows-only application.")
@@ -13,6 +13,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(CRTBender WIN32
     src/main.cpp
     src/config.cpp
+    src/display.cpp
+    src/geometry.cpp
     src/i18n.cpp
     src/warpmesh.cpp
     src/render.cpp
@@ -64,7 +66,7 @@ set_target_properties(CRTBender PROPERTIES OUTPUT_NAME "CRTBender")
 
 # The warp math has no Windows dependencies, so it can be checked on its own.
 #   cmake --build . --target warp_tests && ./warp_tests
-add_executable(warp_tests EXCLUDE_FROM_ALL tests/test_warp.cpp src/warpmesh.cpp)
+add_executable(warp_tests EXCLUDE_FROM_ALL tests/test_warp.cpp src/warpmesh.cpp src/geometry.cpp)
 target_include_directories(warp_tests PRIVATE src)
 
 # The string tables are plain data, so they can be checked off-Windows too.
@@ -76,6 +78,13 @@ if(MSVC)
 else()
     target_compile_options(i18n_tests PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
 endif()
+
+add_executable(geometry_tests EXCLUDE_FROM_ALL
+    tests/test_geometry.cpp src/geometry.cpp src/warpmesh.cpp)
+target_include_directories(geometry_tests PRIVATE src)
+
+add_executable(config_tests EXCLUDE_FROM_ALL tests/test_config.cpp)
+target_include_directories(config_tests PRIVATE src)
 
 install(TARGETS CRTBender RUNTIME DESTINATION .)
 install(FILES README.md DESTINATION .)

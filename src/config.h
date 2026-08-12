@@ -4,12 +4,14 @@
 // the executable when a crtbender.cfg is already there (portable install),
 // otherwise in %APPDATA%\CRTBender\crtbender.cfg.
 //
-// CRT geometry is timing dependent: 1024x768@85 and 1280x960@75 bow differently
-// on the same tube. Corrections are therefore stored per display mode, keyed by
-// "<width>x<height>@<refresh>", and the matching profile is selected
-// automatically whenever the mode changes.
+// CRT geometry depends on both the tube and the timing: two monitors bow
+// differently, and the same tube bows differently at 1600x1200@85 than at
+// 1280x960@75. Corrections are therefore stored per monitor *and* per mode,
+// keyed by "<monitor>|<width>x<height>@<refresh>", and the matching profile is
+// selected automatically.
 #pragma once
 
+#include "geometry.h"
 #include "i18n.h"
 #include "warpmesh.h"
 
@@ -25,6 +27,7 @@ struct Settings {
     bool mirror        = true;   // edit left/right symmetrically
     bool freeMove      = false;  // allow horizontal control point movement
     bool hotkeys       = true;   // register the global calibration hotkeys
+    bool autoBypass    = true;   // step aside for protected video and exclusive fullscreen
     Lang language      = Lang::English;
     int  quality       = 2;      // 0 = bilinear, 1 = bicubic, 2 = Lanczos + anti-ringing
     bool flipPresent   = false;  // present_mode: false = bitblt, true = flip
@@ -35,26 +38,25 @@ struct Settings {
 };
 
 struct Profile {
-    WarpMesh mesh;
-    float    overscan      = 1.0f;   // 1.0 .. 1.15, uniform zoom
-    float    edgeBleedPx   = 0.0f;   // manual bleed width, used when !autoBleed
-    bool     autoBleed     = true;   // derive bleed from the largest offset
-};
+    // Broad shape: rotation, pincushion, trapezoid and friends.
+    GeometryParams    geometry;
+    // Per-point corrections, applied on top of the parametric layer.
+    WarpMesh          mesh;
+    // Red and blue beam alignment relative to green.
+    ConvergenceParams convergence;
 
-// Describes the mode the primary display is running in right now.
-struct DisplayMode {
-    int width   = 0;
-    int height  = 0;
-    int refresh = 0;
-    std::string Key() const;               // "1600x1200@85"
-    bool Valid() const { return width > 0 && height > 0; }
-};
+    float overscan    = 1.0f;    // 1.0 .. 1.15, uniform zoom
+    float edgeBleedPx = 0.0f;    // manual bleed width, used when !autoBleed
+    bool  autoBleed   = false;   // off by default: the smear is more visible on a
+                                 // CRT than the sliver of black it hides
 
-DisplayMode QueryPrimaryDisplayMode();
+    // Whether this profile holds anything worth writing to disk.
+    bool Touched() const;
+};
 
 class Config {
 public:
-    // Resolves the config path and loads it if present. Missing file is not an
+    // Resolves the config path and loads it if present. A missing file is not an
     // error - defaults are used and the file appears on the first Save().
     void Load();
     bool Save() const;
@@ -64,9 +66,14 @@ public:
     Settings&       GetSettings()       { return settings_; }
     const Settings& GetSettings() const { return settings_; }
 
-    // Returns the profile for a mode key, creating a default one if needed.
-    Profile& ProfileFor(const std::string& modeKey);
-    bool     HasProfile(const std::string& modeKey) const;
+    // Returns the profile for a key, creating a default one if needed.
+    Profile& ProfileFor(const std::string& key);
+    bool     HasProfile(const std::string& key) const;
+
+    // Pre-1.2 configs keyed profiles by display mode alone, with no monitor
+    // part, and only ever described the primary monitor. Adopts such a profile
+    // under the new key when nothing better exists. Returns true if it did.
+    bool AdoptLegacyProfile(const std::string& modeKey, const std::string& profileKey);
 
     const std::map<std::string, Profile>& Profiles() const { return profiles_; }
 
@@ -78,9 +85,10 @@ private:
     std::map<std::string, Profile> profiles_;
 };
 
-// Effective bleed in normalized units for a profile at a given mode. Auto mode
-// sizes it from the largest control point offset plus a small margin, so the
-// warped image always covers the screen without a black sliver.
-float EffectiveEdgeBleed(const Profile& profile, const DisplayMode& mode);
+// Effective bleed in normalized units. Auto mode sizes it from the largest
+// displacement the whole profile can produce - parametric layer, lattice and
+// convergence together - plus a small margin, so the warped image always covers
+// the screen without a black sliver at the edge.
+float EffectiveEdgeBleed(const Profile& profile, int screenWidth, int screenHeight);
 
 } // namespace crtb

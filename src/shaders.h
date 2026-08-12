@@ -21,21 +21,31 @@ cbuffer Params : register(b0)
     float4 gGridColor;
     float4 gBorderColor;
     float  gFilterMode;       // 0 = bilinear, 1 = bicubic, 2 = Lanczos-3 + anti-ringing
-    float3 gPad;
+    float  gConvergence;      // 0 = one sample per pixel, 1 = red/green/blue separately
+    float2 gPad;
 };
 
 Texture2D    gTex        : register(t0);
 SamplerState gSmpLinear  : register(s0);
 SamplerState gSmpPoint   : register(s1);
 
-struct VSIn  { float2 pos : POSITION; float2 uv : TEXCOORD0; };
-struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+struct VSIn  {
+    float2 pos  : POSITION;
+    float2 uv   : TEXCOORD0;
+    float4 conv : TEXCOORD1;   // xy = red offset, zw = blue offset
+};
+struct VSOut {
+    float4 pos  : SV_Position;
+    float2 uv   : TEXCOORD0;
+    float4 conv : TEXCOORD1;
+};
 
 VSOut VSMain(VSIn input)
 {
     VSOut o;
-    o.pos = float4(input.pos, 0.0, 1.0);
-    o.uv  = input.uv;
+    o.pos  = float4(input.pos, 0.0, 1.0);
+    o.uv   = input.uv;
+    o.conv = input.conv;
     return o;
 }
 
@@ -140,15 +150,29 @@ float3 SampleLanczos(float2 uv)
     return clamp(result, lo, hi);
 }
 
+float3 SampleDesktop(float2 uv)
+{
+    if (gFilterMode > 1.5) return SampleLanczos(uv);
+    if (gFilterMode > 0.5) return saturate(SampleBicubic(uv));   // clamp the kernel's overshoot
+    return gTex.Sample(gSmpLinear, uv).rgb;
+}
+
 float4 PSMain(VSOut input) : SV_Target
 {
     float3 c;
-    if (gFilterMode > 1.5)
-        c = SampleLanczos(input.uv);
-    else if (gFilterMode > 0.5)
-        c = saturate(SampleBicubic(input.uv));      // clamp the kernel's overshoot
+    if (gConvergence > 0.5)
+    {
+        // Software convergence: green stays put and is the reference, red and
+        // blue are fetched from where their beams actually land. Three times the
+        // sampling work, so it only runs when there is something to correct.
+        c.r = SampleDesktop(input.uv + input.conv.xy).r;
+        c.g = SampleDesktop(input.uv).g;
+        c.b = SampleDesktop(input.uv + input.conv.zw).b;
+    }
     else
-        c = gTex.Sample(gSmpLinear, input.uv).rgb;
+    {
+        c = SampleDesktop(input.uv);
+    }
 
     if (gPatternOpacity > 0.001)
     {
