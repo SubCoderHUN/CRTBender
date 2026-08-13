@@ -10,6 +10,10 @@
 #include <cmath>
 #include <cstdio>
 
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
 namespace crtb {
 namespace {
 
@@ -153,6 +157,11 @@ void SetTextOn(HWND control, const wchar_t* text) {
     if (control) SetWindowTextW(control, text);
 }
 
+BOOL CALLBACK SetChildFont(HWND child, LPARAM font) {
+    SendMessageW(child, WM_SETFONT, font, TRUE);
+    return TRUE;
+}
+
 // Every control that belongs to a tab page, so the layout pass can hide the ones
 // that are not on the current page.
 template <typename Fn>
@@ -199,7 +208,7 @@ void EditorWindow::Open(HINSTANCE inst, EditorHost* host) {
     wc.hIconSm       = wc.hIcon;
     RegisterClassExW(&wc);
 
-    const int dpi = static_cast<int>(GetDpiForSystem());
+    const int dpi = static_cast<int>(SystemDpi());
     const int w   = MulDiv(1180, dpi, 96);
     const int h   = MulDiv(820, dpi, 96);
     const int x   = std::max(0, (GetSystemMetrics(SM_CXSCREEN) - w) / 2);
@@ -444,6 +453,13 @@ void EditorWindow::CreateControls(HWND hwnd) {
     MakeChild(hwnd, L"STATIC", SS_LEFT, CTL_STATUS, inst_);
     MakeChild(hwnd, L"STATIC", SS_LEFT, CTL_HELP, inst_);
 
+#ifdef CRTB_XP
+    // The XP backend is bilinear-only and cannot inspect protected-window
+    // affinity, so keep unsupported settings visible but clearly unavailable.
+    EnableWindow(Ctl(CTL_QUALITY), FALSE);
+    EnableWindow(Ctl(CTL_AUTOBYPASS), FALSE);
+#endif
+
     RelabelControls();
 }
 
@@ -517,7 +533,11 @@ void EditorWindow::RelabelControls() {
         const wchar_t* qualityItems[] = {
             T(Str::EdQualityBilinear), T(Str::EdQualityBicubic), T(Str::EdQualitySharp)
         };
+#ifdef CRTB_XP
+        fillCombo(CTL_QUALITY, qualityItems, 3, 0);
+#else
         fillCombo(CTL_QUALITY, qualityItems, 3, std::clamp(s.quality, 0, 2));
+#endif
 
         const wchar_t* langItems[] = {
             LanguageDisplayName(Lang::English), LanguageDisplayName(Lang::Hungarian)
@@ -866,13 +886,21 @@ void EditorWindow::SyncControlsFromModel() {
     SendMessageW(Ctl(CTL_ENABLED), BM_SETCHECK, s.enabled    ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(Ctl(CTL_MIRROR), BM_SETCHECK, s.mirror     ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(Ctl(CTL_FREEMOVE), BM_SETCHECK, s.freeMove   ? BST_CHECKED : BST_UNCHECKED, 0);
+#ifdef CRTB_XP
+    SendMessageW(Ctl(CTL_AUTOBYPASS), BM_SETCHECK, BST_UNCHECKED, 0);
+#else
     SendMessageW(Ctl(CTL_AUTOBYPASS), BM_SETCHECK, s.autoBypass ? BST_CHECKED : BST_UNCHECKED, 0);
+#endif
     SendMessageW(Ctl(CTL_AUTOBLEED), BM_SETCHECK, p.autoBleed  ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(Ctl(CTL_AUTOSTART), BM_SETCHECK, host_->GetAutostart() ? BST_CHECKED : BST_UNCHECKED, 0);
 
     SendMessageW(Ctl(CTL_MONITOR), CB_SETCURSEL, host_->SelectedMonitor(), 0);
     SendMessageW(Ctl(CTL_PATTERN), CB_SETCURSEL, std::clamp(s.patternMode, 0, 2), 0);
+#ifdef CRTB_XP
+    SendMessageW(Ctl(CTL_QUALITY), CB_SETCURSEL, 0, 0);
+#else
     SendMessageW(Ctl(CTL_QUALITY), CB_SETCURSEL, std::clamp(s.quality, 0, 2), 0);
+#endif
     SendMessageW(Ctl(CTL_LANG), CB_SETCURSEL,
                         s.language == Lang::Hungarian ? 1 : 0, 0);
     SendMessageW(Ctl(CTL_GRID), CB_SETCURSEL, GridIndexFor(p.mesh.Size()), 0);
@@ -1425,15 +1453,12 @@ LRESULT EditorWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE: {
         hwnd_ = hwnd;
-        dpi_  = static_cast<int>(GetDpiForWindow(hwnd));
+        dpi_  = static_cast<int>(WindowDpi(hwnd));
         font_ = CreateFontW(-MulDiv(9, dpi_, 72), 0, 0, 0, FW_NORMAL, 0, 0, 0,
                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
         CreateControls(hwnd);
-        EnumChildWindows(hwnd, [](HWND child, LPARAM param) -> BOOL {
-            SendMessageW(child, WM_SETFONT, param, TRUE);
-            return TRUE;
-        }, reinterpret_cast<LPARAM>(font_));
+        EnumChildWindows(hwnd, SetChildFont, reinterpret_cast<LPARAM>(font_));
         LayoutControls();
         SyncControlsFromModel();
         return 0;
@@ -1457,10 +1482,7 @@ LRESULT EditorWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         font_ = CreateFontW(-MulDiv(9, dpi_, 72), 0, 0, 0, FW_NORMAL, 0, 0, 0,
                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
-        EnumChildWindows(hwnd, [](HWND child, LPARAM param) -> BOOL {
-            SendMessageW(child, WM_SETFONT, param, TRUE);
-            return TRUE;
-        }, reinterpret_cast<LPARAM>(font_));
+        EnumChildWindows(hwnd, SetChildFont, reinterpret_cast<LPARAM>(font_));
         const RECT* suggested = reinterpret_cast<const RECT*>(lp);
         SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
                      suggested->right - suggested->left,

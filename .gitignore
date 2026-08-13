@@ -7,6 +7,8 @@ cmake-build-*/
 *.exe
 # ...except the shipped build, which is committed on purpose.
 !dist/CRTBender.exe
+!dist/CRTBender-Win10-x64.exe
+!dist/CRTBender-WinXP-x86.exe
 *.pdb
 *.ilk
 *.exp

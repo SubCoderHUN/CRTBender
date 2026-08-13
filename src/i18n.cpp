@@ -77,13 +77,22 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
     L"Open the project page in your browser?",
 
     // Engine errors
+#ifdef CRTB_XP
+    L"The Windows XP overlay could not be created. The correction will not start.",
+#else
     L"The overlay window could not be created, or the system does not support "
     L"the WDA_EXCLUDEFROMCAPTURE exclusion (Windows 10 2004 or newer is required). "
     L"The correction will not start, as a safety measure.",
+#endif
     L"The graphics pipeline could not be initialized. See the log file for details.",
+#ifdef CRTB_XP
+    L"GDI screen capture is currently unavailable. Retrying.",
+    L"GDI screen capture returned an empty image, so the correction stays hidden.",
+#else
     L"Screen capture (Desktop Duplication) is currently unavailable. Retrying.",
     L"Screen capture returns an empty, black image, so the correction is not being "
     L"displayed (this keeps your desktop visible). See the log file for details.",
+#endif
 
     // Config file comments
     L"CRTBender configuration\n"
@@ -226,13 +235,22 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
     L"Megnyitod a projekt oldalát a böngészőben?",
 
     // Engine errors
+#ifdef CRTB_XP
+    L"A Windows XP átfedő ablakot nem sikerült létrehozni. A korrekció nem indul el.",
+#else
     L"Az átfedő ablakot nem sikerült létrehozni, vagy a rendszer nem támogatja a "
     L"WDA_EXCLUDEFROMCAPTURE kizárást (Windows 10 2004 vagy újabb kell). "
     L"A korrekció biztonsági okból nem indul el.",
+#endif
     L"A grafikus csővezeték inicializálása nem sikerült. Részletek a naplófájlban.",
+#ifdef CRTB_XP
+    L"A GDI képernyőrögzítés jelenleg nem érhető el. Újrapróbálkozás folyamatban.",
+    L"A GDI képernyőrögzítés üres képet adott, ezért a korrekció rejtve marad.",
+#else
     L"A képernyő rögzítése (Desktop Duplication) jelenleg nem érhető el. Újrapróbálkozás folyamatban.",
     L"A képernyő rögzítése üres, fekete képet ad vissza, ezért a korrekció nem "
     L"jelenik meg (így nem takarja le az asztalt). Részletek a naplófájlban.",
+#endif
 
     // Config file comments
     L"CRTBender konfiguráció\n"

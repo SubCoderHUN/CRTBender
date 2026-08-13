@@ -6,23 +6,35 @@ if(NOT WIN32)
     message(FATAL_ERROR "CRTBender is a Windows-only application.")
 endif()
 
+option(CRTB_XP "Build the 32-bit Windows XP GDI + Direct3D 9 backend" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(CRTBender WIN32
+set(CRTBENDER_COMMON_SOURCES
     src/main.cpp
     src/config.cpp
     src/display.cpp
     src/geometry.cpp
     src/i18n.cpp
     src/warpmesh.cpp
-    src/render.cpp
     src/editor.cpp
     src/autostart.cpp
     src/util.cpp
     res/app.rc
 )
+
+if(CRTB_XP)
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+        message(FATAL_ERROR "The Windows XP target must be configured as Win32/x86.")
+    endif()
+    set(CRTBENDER_RENDER_SOURCE src/render_xp.cpp src/xp_compat.cpp)
+else()
+    set(CRTBENDER_RENDER_SOURCE src/render.cpp)
+endif()
+
+add_executable(CRTBender WIN32 ${CRTBENDER_COMMON_SOURCES} ${CRTBENDER_RENDER_SOURCE})
 
 target_include_directories(CRTBender PRIVATE src res)
 
@@ -31,15 +43,23 @@ target_compile_definitions(CRTBender PRIVATE
     _UNICODE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
-    WINVER=0x0A00
-    _WIN32_WINNT=0x0A00
 )
 
+if(CRTB_XP)
+    target_compile_definitions(CRTBender PRIVATE
+        CRTB_XP=1
+        WINVER=0x0501
+        _WIN32_WINNT=0x0501
+        NTDDI_VERSION=0x05010000
+    )
+else()
+    target_compile_definitions(CRTBender PRIVATE
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+    )
+endif()
+
 target_link_libraries(CRTBender PRIVATE
-    d3d11
-    dxgi
-    dxguid
-    d3dcompiler
     comctl32
     shell32
     ole32
@@ -48,6 +68,12 @@ target_link_libraries(CRTBender PRIVATE
     gdi32
     advapi32
 )
+
+if(CRTB_XP)
+    target_link_libraries(CRTBender PRIVATE d3d9)
+else()
+    target_link_libraries(CRTBender PRIVATE d3d11 dxgi dxguid d3dcompiler)
+endif()
 
 if(MSVC)
     target_compile_options(CRTBender PRIVATE /W4 /permissive- /utf-8)
@@ -60,9 +86,17 @@ else()
         -finput-charset=UTF-8 -fexec-charset=UTF-8)
     target_link_options(CRTBender PRIVATE
         -municode -static -static-libgcc -static-libstdc++)
+    if(CRTB_XP)
+        target_link_options(CRTBender PRIVATE
+            -Wl,--major-subsystem-version,5,--minor-subsystem-version,1)
+    endif()
 endif()
 
-set_target_properties(CRTBender PROPERTIES OUTPUT_NAME "CRTBender")
+if(CRTB_XP)
+    set_target_properties(CRTBender PROPERTIES OUTPUT_NAME "CRTBender-WinXP-x86")
+else()
+    set_target_properties(CRTBender PROPERTIES OUTPUT_NAME "CRTBender")
+endif()
 
 # The warp math has no Windows dependencies, so it can be checked on its own.
 #   cmake --build . --target warp_tests && ./warp_tests

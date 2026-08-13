@@ -7,8 +7,8 @@
 //     present_mode    = bitblt  # bitblt or flip
 //
 // and the reader handed the whole remainder to the value parser. Numbers
-// survived by accident (stoi stops at the first non-digit), but every string
-// and boolean setting compared the full text against "hu" / "1" / "flip", never
+// survived by accident, but every string and boolean setting compared the full
+// text against "hu" / "1" / "flip", never
 // matched, and silently fell back to its default. Language, mirror, free_move,
 // auto_bypass and present_mode all refused to persist.
 //
@@ -72,6 +72,7 @@ int main() {
     CheckInt(ParseConfigInt("15      # grid size", 0), 15, "int with a comment");
     CheckInt(ParseConfigInt("  -3 ", 0), -3, "negative int");
     CheckInt(ParseConfigInt("oops", 7), 7, "garbage keeps the fallback");
+    CheckInt(ParseConfigInt("12x", 7), 7, "trailing garbage keeps the fallback");
     CheckInt(ParseConfigInt("", 7), 7, "empty keeps the fallback");
 
     {
@@ -84,6 +85,12 @@ int main() {
         const float got = ParseConfigFloat("bad", 1.5f);
         const bool ok = got == 1.5f;
         std::printf("  %s: garbage float keeps the fallback\n", ok ? "ok  " : "FAIL");
+        if (!ok) ++g_failures;
+    }
+    {
+        const float got = ParseConfigFloat("1e100", 1.5f);
+        const bool ok = got == 1.5f;
+        std::printf("  %s: out-of-range float keeps the fallback\n", ok ? "ok  " : "FAIL");
         if (!ok) ++g_failures;
     }
 

@@ -3,12 +3,17 @@
 // Deliberately free of any Windows dependency so it can be unit tested, because
 // this is where a whole class of silent bugs lived: the writer emits inline
 // comments ("language = hu    # en or hu") and the reader used to hand the whole
-// remainder to the value parser. Numeric values survived that by accident -
-// stoi stops at the first non-digit - but every string and boolean setting fell
+// remainder to the value parser. Numeric values survived that by accident, but
+// every string and boolean setting fell
 // back to its default, so language, mirror, free_move, auto_bypass and
 // present_mode silently refused to persist.
 #pragma once
 
+#include <cerrno>
+#include <cfloat>
+#include <climits>
+#include <cmath>
+#include <cstdlib>
 #include <string>
 
 namespace crtb {
@@ -35,11 +40,29 @@ inline bool ParseConfigBool(const std::string& raw, bool fallback) {
 }
 
 inline int ParseConfigInt(const std::string& raw, int fallback) {
-    try { return std::stoi(ConfigValue(raw)); } catch (...) { return fallback; }
+    const std::string value = ConfigValue(raw);
+    if (value.empty()) return fallback;
+
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(value.c_str(), &end, 10);
+    if (errno == ERANGE || end == value.c_str() || *end != '\0' ||
+        parsed < INT_MIN || parsed > INT_MAX)
+        return fallback;
+    return static_cast<int>(parsed);
 }
 
 inline float ParseConfigFloat(const std::string& raw, float fallback) {
-    try { return std::stof(ConfigValue(raw)); } catch (...) { return fallback; }
+    const std::string value = ConfigValue(raw);
+    if (value.empty()) return fallback;
+
+    errno = 0;
+    char* end = nullptr;
+    const double parsed = std::strtod(value.c_str(), &end);
+    if (errno == ERANGE || end == value.c_str() || *end != '\0' ||
+        !std::isfinite(parsed) || parsed < -FLT_MAX || parsed > FLT_MAX)
+        return fallback;
+    return static_cast<float>(parsed);
 }
 
 } // namespace crtb

@@ -5,11 +5,10 @@
 ; Program Files-os telepitest szeretnel Start menu bejegyzessel.
 ;
 ; Forditas:  iscc installer\crtbender.iss
-; Elvarja, hogy a build mar megtortent legyen:
-;   cmake -B build -A x64 && cmake --build build --config Release
+; Elvarja, hogy a tools\build.sh mar lefutott legyen.
 
 #define AppName        "CRTBender"
-#define AppVersion     "1.1.0"
+#define AppVersion     "2.0.0"
 #define AppPublisher   "SubCoderHUN"
 #define AppExeName     "CRTBender.exe"
 
@@ -23,7 +22,7 @@ AppSupportURL=https://github.com/SubCoderHUN/CRTBender/issues
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
-OutputBaseFilename=CRTBender-{#AppVersion}-setup
+OutputBaseFilename=CRTBender-{#AppVersion}-Win10-x64-setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -39,7 +38,7 @@ Name: "hungarian"; MessagesFile: "compiler:Languages\Hungarian.isl"
 Name: "english";   MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "..\build\Release\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\CRTBender-Win10-x64.exe"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
 Source: "..\README.md";                   DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "..\LICENSE";                     DestDir: "{app}"; Flags: ignoreversion
 

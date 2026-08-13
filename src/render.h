@@ -5,15 +5,8 @@
 // loops there (dragging a window by its title bar, opening a menu) would
 // otherwise stall the screen.
 //
-// The pipeline is:
-//
-//   DXGI Desktop Duplication  ->  D3D11 texture  ->  warped mesh draw
-//                             ->  fullscreen click-through overlay window
-//
-// The overlay would normally capture itself and feed back, so it is marked
-// WDA_EXCLUDEFROMCAPTURE: still visible on the physical screen, invisible to
-// Desktop Duplication. If that call fails the engine refuses to start rather
-// than producing an infinite hall of mirrors.
+// The Win10 build uses DXGI Desktop Duplication and D3D11. The XP build keeps
+// the same public engine interface but supplies a GDI BitBlt + D3D9 backend.
 #pragma once
 
 #include "config.h"
@@ -28,11 +21,13 @@
 #endif
 #include <windows.h>
 
-#include <atomic>
 #include <memory>
+#ifndef CRTB_XP
+#include <atomic>
 #include <mutex>
-#include <string>
 #include <thread>
+#endif
+#include <string>
 
 namespace crtb {
 
@@ -81,7 +76,13 @@ public:
     void Update(const RenderState& state);
 
     // True while the overlay is up and presenting frames.
+#ifdef CRTB_XP
+    bool Active() const {
+        return InterlockedCompareExchange(const_cast<volatile LONG*>(&active_), 0, 0) != 0;
+    }
+#else
     bool Active() const { return active_.load(std::memory_order_relaxed); }
+#endif
 
     // Last initialization / runtime failure, empty when healthy.
     std::wstring LastError() const;
@@ -97,6 +98,19 @@ private:
     void ThreadMain();
 
     std::unique_ptr<Impl>  impl_;
+#ifdef CRTB_XP
+    static DWORD WINAPI ThreadThunk(LPVOID self);
+    HANDLE                 thread_  = nullptr;
+    volatile LONG          running_ = 0;
+    volatile LONG          active_  = 0;
+    volatile LONG          version_ = 0;
+
+    mutable CRITICAL_SECTION stateMutex_;
+    RenderState              pending_;
+
+    mutable CRITICAL_SECTION errorMutex_;
+    std::wstring             lastError_;
+#else
     std::thread            thread_;
     std::atomic<bool>      running_{false};
     std::atomic<bool>      active_{false};
@@ -107,6 +121,7 @@ private:
 
     mutable std::mutex     errorMutex_;
     std::wstring           lastError_;
+#endif
 
     HWND                   notifyWindow_  = nullptr;
     UINT                   modeChangeMsg_ = 0;

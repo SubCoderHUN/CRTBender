@@ -8,9 +8,19 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <cstring>
 #include <string>
 
 namespace crtb {
+
+template <typename Fn>
+Fn LoadSystemFunction(const wchar_t* module, const char* name) {
+    const FARPROC raw = GetProcAddress(GetModuleHandleW(module), name);
+    static_assert(sizeof(Fn) == sizeof(raw), "unexpected Windows function pointer size");
+    Fn typed = nullptr;
+    std::memcpy(&typed, &raw, sizeof(typed));
+    return typed;
+}
 
 // Minimal COM smart pointer so the project builds with both MSVC and MinGW
 // without pulling in WRL or ATL.
@@ -51,6 +61,11 @@ std::wstring ExePath();
 
 std::string  Narrow(const std::wstring& s);
 std::wstring Widen(const std::string& s);
+
+// Win10 exposes direct DPI helpers, XP does not. These wrappers load the modern
+// APIs when available and otherwise fall back to the system device context.
+UINT SystemDpi();
+UINT WindowDpi(HWND hwnd);
 
 // Rolling log at %APPDATA%\CRTBender\crtbender.log. Never throws.
 void LogInit();

@@ -3,7 +3,11 @@
 
 IDI_APPICON ICON "app.ico"
 
+#ifdef CRTB_XP
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app_xp.manifest"
+#else
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
+#endif
 
 VS_VERSION_INFO VERSIONINFO
   FILEVERSION     2,0,0,0
@@ -19,10 +23,18 @@ BEGIN
     BLOCK "040E04B0"
     BEGIN
       VALUE "CompanyName",      "SubCoderHUN"
+#ifdef CRTB_XP
+      VALUE "FileDescription",  "CRTBender XP - CRT geometry correction"
+#else
       VALUE "FileDescription",  "CRTBender - CRT geometry correction"
+#endif
       VALUE "FileVersion",      "2.0.0"
       VALUE "InternalName",     "CRTBender"
+#ifdef CRTB_XP
+      VALUE "OriginalFilename", "CRTBender-WinXP-x86.exe"
+#else
       VALUE "OriginalFilename", "CRTBender.exe"
+#endif
       VALUE "ProductName",      "CRTBender"
       VALUE "Comments",         "https://github.com/SubCoderHUN/CRTBender"
       VALUE "ProductVersion",   "2.0.0"

@@ -58,6 +58,20 @@ enum : int {
 constexpr UINT kTimerPoll   = 1;   // monitor set / mode changes, engine health
 constexpr UINT kTimerBypass = 2;   // protected-content watcher, needs to be quick
 
+#ifndef WDA_NONE
+#define WDA_NONE 0x00000000
+#endif
+
+bool HasCaptureAffinity(HWND hwnd) {
+    using Fn = BOOL (WINAPI*)(HWND, DWORD*);
+    static Fn getAffinity = LoadSystemFunction<Fn>(
+        L"user32.dll", "GetWindowDisplayAffinity");
+    if (!getAffinity) return false;   // XP: the API does not exist
+
+    DWORD affinity = WDA_NONE;
+    return getAffinity(hwnd, &affinity) && affinity != WDA_NONE;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -273,9 +287,7 @@ void App::UpdateBypass() {
         // capture as solid black. Rather than blanking the user's screen, step
         // aside for as long as it is in the foreground.
         if (HWND foreground = GetForegroundWindow()) {
-            DWORD affinity = 0;
-            if (GetWindowDisplayAffinity(foreground, &affinity) && affinity != WDA_NONE)
-                wantBypass = true;
+            wantBypass = HasCaptureAffinity(foreground);
         }
     }
 
@@ -299,7 +311,10 @@ void App::AddTrayIcon() {
     nid.cbSize           = sizeof(nid);
     nid.hWnd             = hwnd_;
     nid.uID              = kTrayIconId;
-    nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+    nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+#ifndef CRTB_XP
+    nid.uFlags          |= NIF_SHOWTIP;
+#endif
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon            = static_cast<HICON>(LoadImageW(inst_, MAKEINTRESOURCEW(1), IMAGE_ICON,
                                                          GetSystemMetrics(SM_CXSMICON),
@@ -308,7 +323,11 @@ void App::AddTrayIcon() {
     CopyTo(nid.szTip, L"CRTBender");
 
     trayAdded_ = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
+#ifdef CRTB_XP
+    nid.uVersion = NOTIFYICON_VERSION;
+#else
     nid.uVersion = NOTIFYICON_VERSION_4;
+#endif
     Shell_NotifyIconW(NIM_SETVERSION, &nid);
     UpdateTrayTooltip();
 }
@@ -330,7 +349,10 @@ void App::UpdateTrayTooltip() {
     nid.cbSize = sizeof(nid);
     nid.hWnd   = hwnd_;
     nid.uID    = kTrayIconId;
-    nid.uFlags = NIF_TIP | NIF_SHOWTIP;
+    nid.uFlags = NIF_TIP;
+#ifndef CRTB_XP
+    nid.uFlags |= NIF_SHOWTIP;
+#endif
 
     const Settings& s = config_.GetSettings();
     const std::wstring modeText = Widen(ActiveMonitor().ModeKey());

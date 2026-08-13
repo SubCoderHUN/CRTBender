@@ -1,13 +1,36 @@
 #include "util.h"
 
 #include <shlobj.h>
-#include <mutex>
 #include <cstdio>
 
 namespace crtb {
 
+namespace {
+
+class CriticalSection {
+public:
+    CriticalSection() { InitializeCriticalSection(&value_); }
+    ~CriticalSection() { DeleteCriticalSection(&value_); }
+    void Lock() { EnterCriticalSection(&value_); }
+    void Unlock() { LeaveCriticalSection(&value_); }
+
+private:
+    CRITICAL_SECTION value_{};
+};
+
+class ScopedLock {
+public:
+    explicit ScopedLock(CriticalSection& lock) : lock_(lock) { lock_.Lock(); }
+    ~ScopedLock() { lock_.Unlock(); }
+
+private:
+    CriticalSection& lock_;
+};
+
+} // namespace
+
 static std::wstring g_logPath;
-static std::mutex   g_logMutex;
+static CriticalSection g_logMutex;
 
 std::wstring ExePath() {
     wchar_t buf[MAX_PATH * 2] = {};
@@ -23,11 +46,11 @@ std::wstring ExeDir() {
 }
 
 std::wstring AppDataDir() {
-    PWSTR roaming = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming)))
+    wchar_t roaming[MAX_PATH] = {};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA | CSIDL_FLAG_CREATE, nullptr,
+                                SHGFP_TYPE_CURRENT, roaming)))
         return L"";
     std::wstring dir = roaming;
-    CoTaskMemFree(roaming);
     dir += L"\\CRTBender";
     CreateDirectoryW(dir.c_str(), nullptr);   // ignore ERROR_ALREADY_EXISTS
     return dir;
@@ -47,6 +70,23 @@ std::wstring Widen(const std::string& s) {
     std::wstring out(static_cast<size_t>(n), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), out.data(), n);
     return out;
+}
+
+UINT SystemDpi() {
+    using Fn = UINT (WINAPI*)();
+    static Fn getDpi = LoadSystemFunction<Fn>(L"user32.dll", "GetDpiForSystem");
+    if (getDpi) return getDpi();
+
+    HDC dc = GetDC(nullptr);
+    const int dpi = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
+    if (dc) ReleaseDC(nullptr, dc);
+    return dpi > 0 ? static_cast<UINT>(dpi) : 96u;
+}
+
+UINT WindowDpi(HWND hwnd) {
+    using Fn = UINT (WINAPI*)(HWND);
+    static Fn getDpi = LoadSystemFunction<Fn>(L"user32.dll", "GetDpiForWindow");
+    return getDpi ? getDpi(hwnd) : SystemDpi();
 }
 
 std::string Trim(const std::string& s) {
@@ -76,7 +116,7 @@ void LogInit() {
 
 void LogLine(const std::wstring& msg) {
     if (g_logPath.empty()) return;
-    std::lock_guard<std::mutex> lock(g_logMutex);
+    ScopedLock lock(g_logMutex);
 
     SYSTEMTIME st{};
     GetLocalTime(&st);
