@@ -6,15 +6,28 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
 
 <img width="1151" height="835" alt="image" src="https://github.com/user-attachments/assets/b56b0f8d-3ec3-4c9d-a08e-850ca03952bc" />
 
+
 ## Features
 
 - Corrects the whole picture, on every connected monitor.
+<img width="700" height="394" alt="ezgif com-resize" src="https://github.com/user-attachments/assets/f0581e9d-aa1d-44de-9786-9eb61452c951" />
+
 - Sliders for the usual things first: rotation, pincushion, trapezoid, size,
   position, and separate top and bottom edge bows.
+  <img width="346" height="649" alt="image" src="https://github.com/user-attachments/assets/a63842cd-7b71-43b6-bf58-8239d28902cb" />
+  
 - A 15x15 grid on top of that, for anything the sliders cannot reach.
+<img width="777" height="633" alt="image" src="https://github.com/user-attachments/assets/a2ca4ebd-5786-47d7-88f8-02bbc5285274" />
+
 - Convergence correction, for coloured fringes on sharp edges.
+<img width="343" height="513" alt="image" src="https://github.com/user-attachments/assets/28e74eda-6200-481d-9b7e-4982c914dd56" />
+
 - Remembers a separate setting for every monitor and every resolution.
+<img width="349" height="81" alt="image" src="https://github.com/user-attachments/assets/57f2727f-f141-4041-ab19-003584d00263" />
+
 - Built-in test grid to calibrate against.
+<img width="349" height="96" alt="image" src="https://github.com/user-attachments/assets/aa118b8b-25b7-458d-9108-a1819a6cddb6" />
+
 - English and Hungarian.
 
 ## Hotkeys
