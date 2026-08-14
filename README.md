@@ -36,7 +36,7 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
 - `Ctrl+Alt+G` - test grid on/off.
 - `Ctrl+Alt+E` - open the calibration window.
 - `Esc` - hide the test grid.
-- 
+
 ## System Requirements
 | Requirement | Windows 10 / 11 Version | Windows XP Version (Legacy) |
 | :--- | :--- | :--- |
