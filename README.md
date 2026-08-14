@@ -94,6 +94,13 @@ cmake --build build-xp --config Release
 
 On Linux, `./tools/build.sh` cross-builds and packages both editions.
 
+## Roadmap
+- Per-corner RGB convergence controls
+- Auto-calibration via photo / webcam with test pattern recognition
+- Linux port (GLSL shader / Vulkan layer / Gamescope integration)
+- Preset library for specific CRT models / TVs
+- Linux port (GLSL shader / Vulkan layer / Gamescope integration) [High Interest]
+
 ## About
 
 Made by SubCoderHUN - https://github.com/SubCoderHUN/CRTBender
