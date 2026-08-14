@@ -40,7 +40,7 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
 ## System Requirements
 | Requirement | Windows 10 / 11 Version | Windows XP Version (Legacy) |
 | :--- | :--- | :--- |
-| **Operating System** | Windows 10 (1809+) or Windows 11 (64-bit) | Windows XP SP3 (32-bit / x86) |
+| **Operating System** | Windows 10 (1809+) or Windows 11 (64-bit) | Windows XP SP2 (32-bit / x86) |
 | **Graphics API** | Direct3D 11 (`DXGI Desktop Duplication`) | Direct3D 9 (`GDI Capture`) |
 | **GPU Hardware** | DirectX 11 compatible GPU (Intel HD 4000+, GTX 400+, HD 5000+) | DirectX 9.0c GPU with **Pixel Shader 2.0** support (e.g., Radeon 9000+, GeForce FX / 6 series+) |
 | **RAM** | 512 MB | 128 MB |
