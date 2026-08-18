@@ -57,7 +57,7 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
 
 ## Getting Started
 
-1. On Windows 10/11, run `CRTBender.exe`. On 32-bit Windows XP SP2/SP3 with
+1. On Windows 10/11, run `CRTBender-Win10-x64.exe`. On 32-bit Windows XP SP2/SP3 with
    DirectX 9, use `CRTBender-WinXP-x86.exe`. Both live in the tray.
 2. Press `Ctrl+Alt+G` to show the test grid.
 3. On the **Basic geometry** tab, drag the sliders until the lines look straight.
