@@ -20,6 +20,8 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
 <img width="346" height="649" alt="image" src="https://github.com/user-attachments/assets/a63842cd-7b71-43b6-bf58-8239d28902cb" />
 
 - Centre, edge and per-corner RGB convergence correction for coloured fringes.
+<img width="345" height="288" alt="image" src="https://github.com/user-attachments/assets/14cfe8ec-2b8e-4c9d-9ab2-8c22df9a95ea" />
+
 - Selective adaptive sharpening keeps warped text crisp without sharpening
   untouched parts of the desktop.
 <img width="343" height="513" alt="image" src="https://github.com/user-attachments/assets/28e74eda-6200-481d-9b7e-4982c914dd56" />
