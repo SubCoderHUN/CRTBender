@@ -19,13 +19,16 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
   position, and separate top and bottom edge bows.
 <img width="346" height="649" alt="image" src="https://github.com/user-attachments/assets/a63842cd-7b71-43b6-bf58-8239d28902cb" />
 
-- Convergence correction, for coloured fringes on sharp edges.
+- Centre, edge and per-corner RGB convergence correction for coloured fringes.
+- Selective adaptive sharpening keeps warped text crisp without sharpening
+  untouched parts of the desktop.
 <img width="343" height="513" alt="image" src="https://github.com/user-attachments/assets/28e74eda-6200-481d-9b7e-4982c914dd56" />
 
 - Remembers a separate setting for every monitor and every resolution.
 <img width="349" height="81" alt="image" src="https://github.com/user-attachments/assets/57f2727f-f141-4041-ab19-003584d00263" />
 
-- Built-in test grid to calibrate against.
+- Six built-in test patterns: geometry, colour, greyscale, convergence,
+  sharpness and overscan.
 <img width="349" height="96" alt="image" src="https://github.com/user-attachments/assets/aa118b8b-25b7-458d-9108-a1819a6cddb6" />
 
 - English and Hungarian.
@@ -95,10 +98,11 @@ cmake --build build-xp --config Release
 On Linux, `./tools/build.sh` cross-builds and packages both editions.
 
 ## Roadmap
-- Per-corner RGB convergence controls
-- Auto-calibration via photo / webcam with test pattern recognition
-- Preset library for specific CRT models / TVs
-- Linux port (GLSL shader / Vulkan layer / Gamescope integration) [High Interest]
+
+- [x] Per-corner RGB convergence controls
+- [ ] Auto-calibration from a photo or webcam image
+- [ ] Presets for specific CRT monitors and TVs
+- [ ] Linux port using GLSL, Vulkan or Gamescope
 
 ## About
 

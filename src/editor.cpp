@@ -28,6 +28,8 @@ enum ControlId : int {
     CTL_ENABLED,
     CTL_LBL_PATTERN,
     CTL_PATTERN,
+    CTL_LBL_PATTERN_TYPE,
+    CTL_PATTERN_TYPE,
     CTL_TABS,
 
     // Grid page
@@ -47,11 +49,15 @@ enum ControlId : int {
 
     // Convergence page
     CTL_CONV_HINT,
+    CTL_CONV_CORNER_LABEL,
+    CTL_CONV_CORNER,
     CTL_CONV_RESET,
 
     // Image page
     CTL_LBL_QUALITY,
     CTL_QUALITY,
+    CTL_LBL_SHARPNESS,
+    CTL_SHARPNESS,
     CTL_LBL_OVERSCAN,
     CTL_OVERSCAN,
     CTL_AUTOBLEED,
@@ -78,10 +84,13 @@ constexpr int kGeoSliderBase  = 1600;
 constexpr int kGeoLabelBase   = 1700;
 constexpr int kConvSliderBase = 1800;
 constexpr int kConvLabelBase  = 1900;
+constexpr int kCornerConvSliderBase = 2000;
+constexpr int kCornerConvLabelBase  = 2100;
 
 // Trackbars run -kSliderRange..+kSliderRange, mapped onto each parameter's own
 // range. 500 steps over a few pixels is finer than the eye can judge.
 constexpr int kSliderRange = 500;
+constexpr float kCornerConvergenceRange = 0.004f;
 
 struct GeoSlider {
     Str   label;
@@ -114,6 +123,12 @@ struct ConvSlider {
     bool  horizontal;
 };
 
+struct CornerConvSlider {
+    Str  label;
+    bool red;
+    bool horizontal;
+};
+
 constexpr ConvSlider kConvSliders[] = {
     { Str::ConvRedH,      &ConvergenceParams::rH,     0.004f, true  },
     { Str::ConvRedV,      &ConvergenceParams::rV,     0.004f, false },
@@ -125,8 +140,20 @@ constexpr ConvSlider kConvSliders[] = {
     { Str::ConvBlueVEdge, &ConvergenceParams::bVEdge, 0.004f, false },
 };
 
+constexpr CornerConvSlider kCornerConvSliders[] = {
+    { Str::ConvCornerRedH,  true,  true  },
+    { Str::ConvCornerRedV,  true,  false },
+    { Str::ConvCornerBlueH, false, true  },
+    { Str::ConvCornerBlueV, false, false },
+};
+
 constexpr int kGeoCount  = static_cast<int>(std::size(kGeoSliders));
 constexpr int kConvCount = static_cast<int>(std::size(kConvSliders));
+constexpr int kCornerConvCount = static_cast<int>(std::size(kCornerConvSliders));
+
+ScreenCorner CornerFromIndex(int index) {
+    return static_cast<ScreenCorner>(std::clamp(index, 0, 3));
+}
 
 // Offered lattice resolutions. 15x15 is the default: dense enough to shape the
 // whole picture - edges, corners and middle - not just one band of it.
@@ -170,8 +197,9 @@ void ForEachPageControl(Fn fn) {
         CTL_LBL_GRID, CTL_GRID, CTL_MIRROR, CTL_FREEMOVE, CTL_LBL_GAIN, CTL_GAIN,
         CTL_UNDO, CTL_RESETROW, CTL_RESETALL,
         CTL_GEO_HINT, CTL_GEO_RESET,
-        CTL_CONV_HINT, CTL_CONV_RESET,
-        CTL_LBL_QUALITY, CTL_QUALITY, CTL_LBL_OVERSCAN, CTL_OVERSCAN,
+        CTL_CONV_HINT, CTL_CONV_CORNER_LABEL, CTL_CONV_CORNER, CTL_CONV_RESET,
+        CTL_LBL_QUALITY, CTL_QUALITY, CTL_LBL_SHARPNESS, CTL_SHARPNESS,
+        CTL_LBL_OVERSCAN, CTL_OVERSCAN,
         CTL_AUTOBLEED, CTL_LBL_BLEED, CTL_BLEED,
         CTL_LBL_LANG, CTL_LANG, CTL_AUTOSTART, CTL_AUTOBYPASS,
         CTL_SAVE, CTL_GITHUB, CTL_CREDIT,
@@ -179,6 +207,10 @@ void ForEachPageControl(Fn fn) {
     for (int id : kIds) fn(id);
     for (int i = 0; i < kGeoCount; ++i)  { fn(kGeoSliderBase + i);  fn(kGeoLabelBase + i); }
     for (int i = 0; i < kConvCount; ++i) { fn(kConvSliderBase + i); fn(kConvLabelBase + i); }
+    for (int i = 0; i < kCornerConvCount; ++i) {
+        fn(kCornerConvSliderBase + i);
+        fn(kCornerConvLabelBase + i);
+    }
 }
 
 } // namespace
@@ -262,17 +294,44 @@ LRESULT CALLBACK EditorWindow::WndProcThunk(HWND hwnd, UINT msg, WPARAM wp, LPAR
 
 LRESULT CALLBACK EditorWindow::SliderProcThunk(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                                UINT_PTR, DWORD_PTR ref) {
-    // A trackbar normally treats a double click as two clicks, each nudging the
-    // thumb. Returning to the default is far more useful, and matches what
-    // double-clicking a control point already does on the canvas.
-    if (msg == WM_LBUTTONDBLCLK) {
-        if (auto* self = reinterpret_cast<EditorWindow*>(ref)) {
+    auto* self = reinterpret_cast<EditorWindow*>(ref);
+
+    // The standard trackbar class does not consistently request native double-
+    // click messages. Recognize the second button-down ourselves using the
+    // user's Windows double-click timing and distance settings.
+    if (msg == WM_LBUTTONDOWN && self) {
+        const DWORD now = static_cast<DWORD>(GetMessageTime());
+        const POINT point{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+        const bool sameControl = self->lastSliderClick_ == hwnd;
+        const bool soonEnough =
+            now - self->lastSliderClickTime_ <= GetDoubleClickTime();
+        const bool closeEnough =
+            std::abs(point.x - self->lastSliderClickPoint_.x) <=
+                std::max(1, GetSystemMetrics(SM_CXDOUBLECLK) / 2) &&
+            std::abs(point.y - self->lastSliderClickPoint_.y) <=
+                std::max(1, GetSystemMetrics(SM_CYDOUBLECLK) / 2);
+
+        self->lastSliderClick_ = hwnd;
+        self->lastSliderClickTime_ = now;
+        self->lastSliderClickPoint_ = point;
+        if (sameControl && soonEnough && closeEnough) {
+            self->ClearSliderClick();
             self->ResetSliderToDefault(static_cast<int>(GetDlgCtrlID(hwnd)));
             return 0;
         }
     }
-    if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, &EditorWindow::SliderProcThunk,
-                                                  kSliderSubclassId);
+
+    // Keep the native path too, for trackbar implementations that do emit it.
+    if (msg == WM_LBUTTONDBLCLK && self) {
+        self->ClearSliderClick();
+        self->ResetSliderToDefault(static_cast<int>(GetDlgCtrlID(hwnd)));
+        return 0;
+    }
+
+    if (msg == WM_NCDESTROY) {
+        if (self && self->lastSliderClick_ == hwnd) self->ClearSliderClick();
+        RemoveWindowSubclass(hwnd, &EditorWindow::SliderProcThunk, kSliderSubclassId);
+    }
     return DefSubclassProc(hwnd, msg, wp, lp);
 }
 
@@ -305,6 +364,10 @@ LRESULT CALLBACK EditorWindow::PageHostProcThunk(HWND hwnd, UINT msg, WPARAM wp,
             self->ScrollPageBy(-notches * self->Scale(kScrollLine) * 3);
         }
         return 0;
+
+    case WM_LBUTTONDOWN:
+        if (self) self->ClearSliderClick();
+        break;
 
     case WM_CTLCOLORSTATIC:
         SetBkColor(reinterpret_cast<HDC>(wp), GetSysColor(COLOR_BTNFACE));
@@ -350,6 +413,9 @@ void EditorWindow::CreateControls(HWND hwnd) {
     MakeChild(hwnd, L"BUTTON", BS_AUTOCHECKBOX, CTL_ENABLED, inst_);
     MakeChild(hwnd, L"STATIC", SS_LEFT, CTL_LBL_PATTERN, inst_);
     MakeChild(hwnd, L"COMBOBOX", CBS_DROPDOWNLIST | WS_VSCROLL, CTL_PATTERN, inst_);
+    MakeChild(hwnd, L"STATIC", SS_LEFT, CTL_LBL_PATTERN_TYPE, inst_);
+    MakeChild(hwnd, L"COMBOBOX", CBS_DROPDOWNLIST | WS_VSCROLL,
+              CTL_PATTERN_TYPE, inst_);
 
     tabs_ = MakeChild(hwnd, WC_TABCONTROLW,
                       TCS_TABS | TCS_FIXEDWIDTH | WS_CLIPCHILDREN, CTL_TABS, inst_);
@@ -423,11 +489,29 @@ void EditorWindow::CreateControls(HWND hwnd) {
         SetWindowSubclass(slider, &EditorWindow::SliderProcThunk, kSliderSubclassId,
                           reinterpret_cast<DWORD_PTR>(this));
     }
+    MakeChild(page, L"STATIC", SS_LEFT, CTL_CONV_CORNER_LABEL, inst_);
+    MakeChild(page, L"COMBOBOX", CBS_DROPDOWNLIST | WS_VSCROLL,
+              CTL_CONV_CORNER, inst_);
+    for (int i = 0; i < kCornerConvCount; ++i) {
+        MakeChild(page, L"STATIC", SS_LEFT, kCornerConvLabelBase + i, inst_);
+        HWND slider = MakeChild(page, TRACKBAR_CLASSW, TBS_HORZ | TBS_NOTICKS,
+                                kCornerConvSliderBase + i, inst_);
+        SendMessageW(slider, TBM_SETRANGEMIN, FALSE, -kSliderRange);
+        SendMessageW(slider, TBM_SETRANGEMAX, TRUE, kSliderRange);
+        SetWindowSubclass(slider, &EditorWindow::SliderProcThunk, kSliderSubclassId,
+                          reinterpret_cast<DWORD_PTR>(this));
+    }
     MakeChild(page, L"BUTTON", BS_PUSHBUTTON, CTL_CONV_RESET, inst_);
 
     // Image page
     MakeChild(page, L"STATIC", SS_LEFT, CTL_LBL_QUALITY, inst_);
     MakeChild(page, L"COMBOBOX", CBS_DROPDOWNLIST | WS_VSCROLL, CTL_QUALITY, inst_);
+    MakeChild(page, L"STATIC", SS_LEFT, CTL_LBL_SHARPNESS, inst_);
+    HWND sharpness = MakeChild(page, TRACKBAR_CLASSW, TBS_HORZ | TBS_NOTICKS,
+                               CTL_SHARPNESS, inst_);
+    SendMessageW(sharpness, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+    SetWindowSubclass(sharpness, &EditorWindow::SliderProcThunk, kSliderSubclassId,
+                      reinterpret_cast<DWORD_PTR>(this));
     MakeChild(page, L"STATIC", SS_LEFT, CTL_LBL_OVERSCAN, inst_);
     HWND overscan = MakeChild(page, TRACKBAR_CLASSW, TBS_HORZ | TBS_NOTICKS, CTL_OVERSCAN, inst_);
     SendMessageW(overscan, TBM_SETRANGE, TRUE, MAKELPARAM(100, 115));
@@ -457,6 +541,7 @@ void EditorWindow::CreateControls(HWND hwnd) {
     // The XP backend is bilinear-only and cannot inspect protected-window
     // affinity, so keep unsupported settings visible but clearly unavailable.
     EnableWindow(Ctl(CTL_QUALITY), FALSE);
+    EnableWindow(Ctl(CTL_SHARPNESS), FALSE);
     EnableWindow(Ctl(CTL_AUTOBYPASS), FALSE);
 #endif
 
@@ -472,6 +557,7 @@ void EditorWindow::RelabelControls() {
     SetTextOn(Ctl(CTL_LBL_MONITOR), T(Str::EdMonitorLabel));
     SetTextOn(Ctl(CTL_ENABLED),     T(Str::EdEnabled));
     SetTextOn(Ctl(CTL_LBL_PATTERN), T(Str::EdPatternLabel));
+    SetTextOn(Ctl(CTL_LBL_PATTERN_TYPE), T(Str::EdPatternTypeLabel));
 
     SetTextOn(Ctl(CTL_LBL_GRID),    T(Str::EdGridLabel));
     SetTextOn(Ctl(CTL_MIRROR),      T(Str::EdMirror));
@@ -483,6 +569,7 @@ void EditorWindow::RelabelControls() {
     SetTextOn(Ctl(CTL_GEO_HINT),    T(Str::GeoHint));
     SetTextOn(Ctl(CTL_GEO_RESET),   T(Str::GeoReset));
     SetTextOn(Ctl(CTL_CONV_HINT),   T(Str::ConvHint));
+    SetTextOn(Ctl(CTL_CONV_CORNER_LABEL), T(Str::ConvCornerLabel));
     SetTextOn(Ctl(CTL_CONV_RESET),  T(Str::ConvReset));
 
     SetTextOn(Ctl(CTL_LBL_QUALITY), T(Str::EdQualityLabel));
@@ -522,6 +609,12 @@ void EditorWindow::RelabelControls() {
         SendMessageW(h, CB_SETCURSEL, selection, 0);
     };
 
+    const wchar_t* cornerItems[] = {
+        T(Str::ConvTopLeft), T(Str::ConvTopRight),
+        T(Str::ConvBottomLeft), T(Str::ConvBottomRight),
+    };
+    fillCombo(CTL_CONV_CORNER, cornerItems, 4, selectedCorner_);
+
     if (host_) {
         const Settings& s = host_->HostSettings();
 
@@ -529,6 +622,17 @@ void EditorWindow::RelabelControls() {
             T(Str::TrayPatternOff), T(Str::TrayPatternOverDesktop), T(Str::TrayPatternOnBlack)
         };
         fillCombo(CTL_PATTERN, patternItems, 3, std::clamp(s.patternMode, 0, 2));
+
+        const wchar_t* patternTypeItems[] = {
+            T(Str::PatternGeometryGrid),
+            T(Str::PatternColourBars),
+            T(Str::PatternGreyscale),
+            T(Str::PatternConvergence),
+            T(Str::PatternSharpness),
+            T(Str::PatternOverscan),
+        };
+        fillCombo(CTL_PATTERN_TYPE, patternTypeItems, kTestPatternCount,
+                  static_cast<int>(s.patternType));
 
         const wchar_t* qualityItems[] = {
             T(Str::EdQualityBilinear), T(Str::EdQualityBicubic), T(Str::EdQualitySharp)
@@ -595,6 +699,8 @@ void EditorWindow::RefreshValueLabels() {
 
     swprintf(buf, std::size(buf), T(Str::EdGainLabel), s.previewGain);
     SetTextOn(Ctl(CTL_LBL_GAIN), buf);
+    swprintf(buf, std::size(buf), T(Str::EdSharpnessLabel), s.sharpnessPct);
+    SetTextOn(Ctl(CTL_LBL_SHARPNESS), buf);
     swprintf(buf, std::size(buf), T(Str::EdOverscanLabel), p.overscan * 100.0f);
     SetTextOn(Ctl(CTL_LBL_OVERSCAN), buf);
     swprintf(buf, std::size(buf), T(Str::EdBleedLabel), p.edgeBleedPx);
@@ -621,6 +727,18 @@ void EditorWindow::RefreshValueLabels() {
                  normalized * (spec.horizontal ? widthPx : heightPx));
         swprintf(buf, std::size(buf), L"%ls:  %ls", T(spec.label), value);
         SetTextOn(Ctl(kConvLabelBase + i), buf);
+    }
+
+    const ScreenCorner corner = CornerFromIndex(selectedCorner_);
+    for (int i = 0; i < kCornerConvCount; ++i) {
+        const CornerConvSlider& spec = kCornerConvSliders[i];
+        const Offset& offset = spec.red ? p.convergence.RedCorner(corner)
+                                        : p.convergence.BlueCorner(corner);
+        const float normalized = spec.horizontal ? offset.dx : offset.dy;
+        swprintf(value, std::size(value), T(Str::ValuePixels),
+                 normalized * (spec.horizontal ? widthPx : heightPx));
+        swprintf(buf, std::size(buf), L"%ls:  %ls", T(spec.label), value);
+        SetTextOn(Ctl(kCornerConvLabelBase + i), buf);
     }
 }
 
@@ -657,6 +775,8 @@ void EditorWindow::LayoutControls() {
     place(CTL_ENABLED, rowH);         y += rowH + gapM;
     place(CTL_LBL_PATTERN, labelH);   y += labelH + gapS;
     place(CTL_PATTERN, comboH);       y += rowH + gapM;
+    place(CTL_LBL_PATTERN_TYPE, labelH); y += labelH + gapS;
+    place(CTL_PATTERN_TYPE, comboH);     y += rowH + gapM;
 
     const int tabsBottom = std::max(y + Scale(80), static_cast<int>(client.bottom) - pad);
     if (tabs_) {
@@ -777,10 +897,17 @@ int EditorWindow::LayoutPage(bool measureOnly) {
         break;
 
     case kPageConvergence:
-        put(CTL_CONV_HINT, Scale(72)); y += Scale(72) + gapM;
+        put(CTL_CONV_HINT, Scale(88)); y += Scale(88) + gapM;
         for (int i = 0; i < kConvCount; ++i) {
             put(kConvLabelBase + i, labelH);  y += labelH;
             put(kConvSliderBase + i, barH);   y += barH + gapS;
+        }
+        y += gapM;
+        put(CTL_CONV_CORNER_LABEL, labelH); y += labelH + gapS;
+        put(CTL_CONV_CORNER, comboH);       y += rowH + gapM;
+        for (int i = 0; i < kCornerConvCount; ++i) {
+            put(kCornerConvLabelBase + i, labelH); y += labelH;
+            put(kCornerConvSliderBase + i, barH);  y += barH + gapS;
         }
         y += gapS;
         put(CTL_CONV_RESET, rowH + Scale(4));
@@ -790,6 +917,8 @@ int EditorWindow::LayoutPage(bool measureOnly) {
     case kPageImage:
         put(CTL_LBL_QUALITY, labelH);   y += labelH + gapS;
         put(CTL_QUALITY, comboH);       y += rowH + gapM;
+        put(CTL_LBL_SHARPNESS, labelH); y += labelH + gapS;
+        put(CTL_SHARPNESS, barH);        y += barH + gapM;
         put(CTL_LBL_OVERSCAN, labelH);  y += labelH + gapS;
         put(CTL_OVERSCAN, barH);        y += barH + gapM;
         put(CTL_AUTOBLEED, rowH);       y += rowH + gapS;
@@ -896,16 +1025,21 @@ void EditorWindow::SyncControlsFromModel() {
 
     SendMessageW(Ctl(CTL_MONITOR), CB_SETCURSEL, host_->SelectedMonitor(), 0);
     SendMessageW(Ctl(CTL_PATTERN), CB_SETCURSEL, std::clamp(s.patternMode, 0, 2), 0);
+    SendMessageW(Ctl(CTL_PATTERN_TYPE), CB_SETCURSEL,
+                 static_cast<int>(s.patternType), 0);
 #ifdef CRTB_XP
     SendMessageW(Ctl(CTL_QUALITY), CB_SETCURSEL, 0, 0);
 #else
     SendMessageW(Ctl(CTL_QUALITY), CB_SETCURSEL, std::clamp(s.quality, 0, 2), 0);
+    EnableWindow(Ctl(CTL_SHARPNESS), s.quality == 2);
 #endif
     SendMessageW(Ctl(CTL_LANG), CB_SETCURSEL,
                         s.language == Lang::Hungarian ? 1 : 0, 0);
     SendMessageW(Ctl(CTL_GRID), CB_SETCURSEL, GridIndexFor(p.mesh.Size()), 0);
+    SendMessageW(Ctl(CTL_CONV_CORNER), CB_SETCURSEL, selectedCorner_, 0);
 
     SendMessageW(Ctl(CTL_GAIN), TBM_SETPOS, TRUE, s.previewGain);
+    SendMessageW(Ctl(CTL_SHARPNESS), TBM_SETPOS, TRUE, s.sharpnessPct);
     SendMessageW(Ctl(CTL_OVERSCAN), TBM_SETPOS, TRUE,
                         static_cast<LPARAM>(std::lround(p.overscan * 100.0f)));
     SendMessageW(Ctl(CTL_BLEED), TBM_SETPOS, TRUE,
@@ -925,6 +1059,17 @@ void EditorWindow::SyncControlsFromModel() {
             p.convergence.*(spec.member) / spec.range * kSliderRange));
         SendMessageW(Ctl(kConvSliderBase + i), TBM_SETPOS, TRUE,
                             std::clamp(pos, -kSliderRange, kSliderRange));
+    }
+    const ScreenCorner corner = CornerFromIndex(selectedCorner_);
+    for (int i = 0; i < kCornerConvCount; ++i) {
+        const CornerConvSlider& spec = kCornerConvSliders[i];
+        const Offset& offset = spec.red ? p.convergence.RedCorner(corner)
+                                        : p.convergence.BlueCorner(corner);
+        const float value = spec.horizontal ? offset.dx : offset.dy;
+        const int pos = static_cast<int>(std::lround(
+            value / kCornerConvergenceRange * kSliderRange));
+        SendMessageW(Ctl(kCornerConvSliderBase + i), TBM_SETPOS, TRUE,
+                     std::clamp(pos, -kSliderRange, kSliderRange));
     }
 
     suppressSync_ = false;
@@ -952,6 +1097,18 @@ void EditorWindow::ApplyControlsToModel(int controlId) {
         const int pos = static_cast<int>(
             SendMessageW(Ctl(controlId), TBM_GETPOS, 0, 0));
         p.convergence.*(spec.member) = static_cast<float>(pos) / kSliderRange * spec.range;
+        persist = false;
+    } else if (controlId >= kCornerConvSliderBase &&
+               controlId < kCornerConvSliderBase + kCornerConvCount) {
+        const CornerConvSlider& spec =
+            kCornerConvSliders[controlId - kCornerConvSliderBase];
+        const int pos = static_cast<int>(
+            SendMessageW(Ctl(controlId), TBM_GETPOS, 0, 0));
+        Offset& offset = spec.red
+            ? p.convergence.RedCorner(CornerFromIndex(selectedCorner_))
+            : p.convergence.BlueCorner(CornerFromIndex(selectedCorner_));
+        float& value = spec.horizontal ? offset.dx : offset.dy;
+        value = static_cast<float>(pos) / kSliderRange * kCornerConvergenceRange;
         persist = false;
     } else {
         switch (controlId) {
@@ -986,13 +1143,27 @@ void EditorWindow::ApplyControlsToModel(int controlId) {
             }
             return;
         }
+        case CTL_CONV_CORNER: {
+            const int index = static_cast<int>(
+                SendMessageW(Ctl(CTL_CONV_CORNER), CB_GETCURSEL, 0, 0));
+            selectedCorner_ = std::clamp(index, 0, 3);
+            SyncControlsFromModel();
+            return;
+        }
         case CTL_PATTERN:
             s.patternMode = std::clamp(static_cast<int>(
                 SendMessageW(Ctl(CTL_PATTERN), CB_GETCURSEL, 0, 0)), 0, 2);
             break;
+        case CTL_PATTERN_TYPE:
+            s.patternType = TestPatternFromIndex(static_cast<int>(
+                SendMessageW(Ctl(CTL_PATTERN_TYPE), CB_GETCURSEL, 0, 0)));
+            break;
         case CTL_QUALITY:
             s.quality = std::clamp(static_cast<int>(
                 SendMessageW(Ctl(CTL_QUALITY), CB_GETCURSEL, 0, 0)), 0, 2);
+#ifndef CRTB_XP
+            EnableWindow(Ctl(CTL_SHARPNESS), s.quality == 2);
+#endif
             break;
         case CTL_LANG: {
             const int index = static_cast<int>(
@@ -1022,6 +1193,11 @@ void EditorWindow::ApplyControlsToModel(int controlId) {
                 SendMessageW(Ctl(CTL_GAIN), TBM_GETPOS, 0, 0));
             persist = false;   // preview only, saved with the next real edit
             break;
+        case CTL_SHARPNESS:
+            s.sharpnessPct = static_cast<int>(
+                SendMessageW(Ctl(CTL_SHARPNESS), TBM_GETPOS, 0, 0));
+            persist = false;
+            break;
         case CTL_OVERSCAN:
             p.overscan = static_cast<float>(
                 SendMessageW(Ctl(CTL_OVERSCAN), TBM_GETPOS, 0, 0)) / 100.0f;
@@ -1047,6 +1223,12 @@ void EditorWindow::ApplyControlsToModel(int controlId) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void EditorWindow::ClearSliderClick() {
+    lastSliderClick_ = nullptr;
+    lastSliderClickTime_ = 0;
+    lastSliderClickPoint_ = POINT{};
+}
+
 void EditorWindow::ResetSliderToDefault(int id) {
     if (!hwnd_ || !host_) return;
 
@@ -1064,8 +1246,21 @@ void EditorWindow::ResetSliderToDefault(int id) {
     } else if (id >= kConvSliderBase && id < kConvSliderBase + kConvCount) {
         const ConvSlider& spec = kConvSliders[id - kConvSliderBase];
         p.convergence.*(spec.member) = kDefaultProfile.convergence.*(spec.member);
+    } else if (id >= kCornerConvSliderBase &&
+               id < kCornerConvSliderBase + kCornerConvCount) {
+        const CornerConvSlider& spec = kCornerConvSliders[id - kCornerConvSliderBase];
+        const ScreenCorner corner = CornerFromIndex(selectedCorner_);
+        Offset& value = spec.red ? p.convergence.RedCorner(corner)
+                                 : p.convergence.BlueCorner(corner);
+        const Offset& defaultValue = spec.red
+            ? kDefaultProfile.convergence.RedCorner(corner)
+            : kDefaultProfile.convergence.BlueCorner(corner);
+        if (spec.horizontal) value.dx = defaultValue.dx;
+        else                 value.dy = defaultValue.dy;
     } else if (id == CTL_GAIN) {
         s.previewGain = kDefaultSettings.previewGain;
+    } else if (id == CTL_SHARPNESS) {
+        s.sharpnessPct = kDefaultSettings.sharpnessPct;
     } else if (id == CTL_OVERSCAN) {
         p.overscan = kDefaultProfile.overscan;
     } else if (id == CTL_BLEED) {
@@ -1545,6 +1740,7 @@ LRESULT EditorWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_NOTIFY: {
         auto* header = reinterpret_cast<LPNMHDR>(lp);
         if (header && tabs_ && header->hwndFrom == tabs_ && header->code == TCN_SELCHANGE) {
+            ClearSliderClick();
             page_ = static_cast<int>(SendMessageW(tabs_, TCM_GETCURSEL, 0, 0));
             scrollPos_ = 0;          // a new page always starts at the top
             LayoutControls();
@@ -1554,6 +1750,7 @@ LRESULT EditorWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_LBUTTONDOWN: {
+        ClearSliderClick();
         SetFocus(hwnd);
         RECT client{};
         GetClientRect(hwnd, &client);
@@ -1683,6 +1880,7 @@ LRESULT EditorWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_COMMAND: {
+        ClearSliderClick();
         const int id   = LOWORD(wp);
         const int code = HIWORD(wp);
 

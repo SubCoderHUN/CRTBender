@@ -17,6 +17,8 @@
 
 #include "warpmesh.h"
 
+#include <array>
+
 namespace crtb {
 
 // Centred coordinates used throughout: s = 2u-1 and t = 2v-1, both -1..1, so the
@@ -55,16 +57,44 @@ struct GeometryParams {
 // and growing towards the edges. Green is the reference; red and blue are
 // shifted to meet it.
 //
-// A centre offset plus a linear edge term covers the dominant real-world error
-// without turning convergence into a second 225-point calibration job.
+enum class ScreenCorner {
+    TopLeft = 0,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Count,
+};
+
+// A centre offset plus a linear edge term covers the broad error. Four local
+// corner values handle the remaining colour split without disturbing the
+// already aligned centre of the picture.
 struct ConvergenceParams {
+    static constexpr std::size_t kCornerCount =
+        static_cast<std::size_t>(ScreenCorner::Count);
+
     float rH = 0.0f, rV = 0.0f;           // red, uniform offset
     float rHEdge = 0.0f, rVEdge = 0.0f;   // red, growing towards the edges
     float bH = 0.0f, bV = 0.0f;           // blue, uniform offset
     float bHEdge = 0.0f, bVEdge = 0.0f;   // blue, growing towards the edges
 
+    std::array<Offset, kCornerCount> redCorners{};
+    std::array<Offset, kCornerCount> blueCorners{};
+
     bool Any() const;
     void Reset() { *this = ConvergenceParams{}; }
+
+    Offset& RedCorner(ScreenCorner corner) {
+        return redCorners[static_cast<std::size_t>(corner)];
+    }
+    const Offset& RedCorner(ScreenCorner corner) const {
+        return redCorners[static_cast<std::size_t>(corner)];
+    }
+    Offset& BlueCorner(ScreenCorner corner) {
+        return blueCorners[static_cast<std::size_t>(corner)];
+    }
+    const Offset& BlueCorner(ScreenCorner corner) const {
+        return blueCorners[static_cast<std::size_t>(corner)];
+    }
 
     // Where to sample red and blue from, relative to green. The sign convention
     // matches the sliders: a positive rH means "the red beam lands to the right",

@@ -16,6 +16,27 @@ inline float EdgeRamp(float x) {
 
 inline bool NonZero(float v) { return std::fabs(v) > 1e-7f; }
 
+void AddCornerField(const std::array<Offset, ConvergenceParams::kCornerCount>& corners,
+                    float u, float v, Offset& out) {
+    // Each corner reaches full strength only at that corner and fades smoothly
+    // to zero by the horizontal or vertical centre line.
+    const float left   = EdgeRamp(1.0f - 2.0f * u);
+    const float right  = EdgeRamp(2.0f * u - 1.0f);
+    const float top    = EdgeRamp(1.0f - 2.0f * v);
+    const float bottom = EdgeRamp(2.0f * v - 1.0f);
+
+    const float weights[ConvergenceParams::kCornerCount] = {
+        left * top,
+        right * top,
+        left * bottom,
+        right * bottom,
+    };
+    for (std::size_t i = 0; i < ConvergenceParams::kCornerCount; ++i) {
+        out.dx += corners[i].dx * weights[i];
+        out.dy += corners[i].dy * weights[i];
+    }
+}
+
 } // namespace
 
 bool GeometryParams::Any() const {
@@ -85,8 +106,16 @@ void GeometryParams::MaxMagnitude(float aspect, float& maxDx, float& maxDy) cons
 // ---------------------------------------------------------------------------
 
 bool ConvergenceParams::Any() const {
-    return NonZero(rH) || NonZero(rV) || NonZero(rHEdge) || NonZero(rVEdge) ||
-           NonZero(bH) || NonZero(bV) || NonZero(bHEdge) || NonZero(bVEdge);
+    if (NonZero(rH) || NonZero(rV) || NonZero(rHEdge) || NonZero(rVEdge) ||
+        NonZero(bH) || NonZero(bV) || NonZero(bHEdge) || NonZero(bVEdge))
+        return true;
+
+    for (std::size_t i = 0; i < kCornerCount; ++i) {
+        if (NonZero(redCorners[i].dx) || NonZero(redCorners[i].dy) ||
+            NonZero(blueCorners[i].dx) || NonZero(blueCorners[i].dy))
+            return true;
+    }
+    return false;
 }
 
 void ConvergenceParams::At(float u, float v, Offset& outRed, Offset& outBlue) const {
@@ -97,11 +126,28 @@ void ConvergenceParams::At(float u, float v, Offset& outRed, Offset& outBlue) co
     outRed.dy  = rV + rVEdge * t;
     outBlue.dx = bH + bHEdge * s;
     outBlue.dy = bV + bVEdge * t;
+
+    AddCornerField(redCorners, std::clamp(u, 0.0f, 1.0f),
+                   std::clamp(v, 0.0f, 1.0f), outRed);
+    AddCornerField(blueCorners, std::clamp(u, 0.0f, 1.0f),
+                   std::clamp(v, 0.0f, 1.0f), outBlue);
 }
 
 void ConvergenceParams::MaxMagnitude(float& maxDx, float& maxDy) const {
-    maxDx = std::max(std::fabs(rH) + std::fabs(rHEdge), std::fabs(bH) + std::fabs(bHEdge));
-    maxDy = std::max(std::fabs(rV) + std::fabs(rVEdge), std::fabs(bV) + std::fabs(bVEdge));
+    maxDx = maxDy = 0.0f;
+    if (!Any()) return;
+
+    constexpr int kSteps = 16;
+    for (int row = 0; row <= kSteps; ++row) {
+        const float v = static_cast<float>(row) / kSteps;
+        for (int col = 0; col <= kSteps; ++col) {
+            const float u = static_cast<float>(col) / kSteps;
+            Offset red, blue;
+            At(u, v, red, blue);
+            maxDx = std::max({ maxDx, std::fabs(red.dx), std::fabs(blue.dx) });
+            maxDy = std::max({ maxDy, std::fabs(red.dy), std::fabs(blue.dy) });
+        }
+    }
 }
 
 } // namespace crtb

@@ -79,6 +79,9 @@ struct WarpEngine::Impl {
     bool loggedCaptureFailure = false;
     bool captureWasBlank = false;
     bool loggedPresentFailure = false;
+    DWORD blankSince = 0;
+    DWORD goodSince  = 0;
+    DWORD lastCaptureLog = 0;
 
     RenderState state;
 
@@ -96,6 +99,7 @@ struct WarpEngine::Impl {
     void ApplyPattern();
     void BlendPixel(int x, int y, unsigned char r, unsigned char g,
                     unsigned char b, int alpha);
+    void BlendFrame(unsigned char r, unsigned char g, unsigned char b, int alpha);
     void DrawHorizontal(int y, int thickness, unsigned char r, unsigned char g,
                         unsigned char b, int alpha);
     void DrawVertical(int x, int thickness, unsigned char r, unsigned char g,
@@ -118,10 +122,24 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     case WM_DISPLAYCHANGE:
         if (impl) {
             LogLine(L"XP display mode changed, reinitializing GDI/D3D9 pipeline");
+            impl->SetVisible(false);
             impl->needReinit = true;
             if (impl->owner) impl->owner->OnDisplayChanged();
         }
         return 0;
+
+    case WM_POWERBROADCAST:
+        if (!impl) return TRUE;
+        if (wp == PBT_APMSUSPEND) {
+            impl->SetVisible(false);
+        } else if (wp == PBT_APMRESUMEAUTOMATIC ||
+                   wp == PBT_APMRESUMESUSPEND ||
+                   wp == PBT_APMRESUMECRITICAL) {
+            LogLine(L"XP system resumed, rebuilding GDI/D3D9 pipeline");
+            impl->SetVisible(false);
+            impl->needReinit = true;
+        }
+        return TRUE;
 
     case WM_TIMER:
         if (wp == kTimerTopmost && impl && impl->visible) {
@@ -198,6 +216,9 @@ void WarpEngine::Impl::ShutdownGraphics() {
     gridDirty    = true;
     captureWasBlank = false;
     loggedPresentFailure = false;
+    blankSince = 0;
+    goodSince = 0;
+    lastCaptureLog = 0;
     vertices.clear();
     redVertices.clear();
     blueVertices.clear();
@@ -395,6 +416,20 @@ void WarpEngine::Impl::BlendPixel(int x, int y, unsigned char r, unsigned char g
     px[3] = 255;
 }
 
+void WarpEngine::Impl::BlendFrame(unsigned char r, unsigned char g,
+                                  unsigned char b, int alpha) {
+    if (!captureBits) return;
+    auto* pixels = static_cast<unsigned char*>(captureBits);
+    const size_t count = static_cast<size_t>(width) * height;
+    for (size_t i = 0; i < count; ++i) {
+        unsigned char* px = pixels + i * 4;
+        px[0] = BlendChannel(px[0], b, alpha);
+        px[1] = BlendChannel(px[1], g, alpha);
+        px[2] = BlendChannel(px[2], r, alpha);
+        px[3] = 255;
+    }
+}
+
 void WarpEngine::Impl::DrawHorizontal(int y, int thickness, unsigned char r, unsigned char g,
                                       unsigned char b, int alpha) {
     const int first = y - thickness / 2;
@@ -421,23 +456,99 @@ void WarpEngine::Impl::ApplyPattern() {
     const int cellsY = std::clamp(static_cast<int>(std::lround(
         static_cast<double>(cellsX) * height / std::max(1, width))), 2, 64);
 
-    for (int i = 0; i <= cellsX; ++i) {
-        const int x = static_cast<int>(std::lround(
-            static_cast<double>(i) * (width - 1) / cellsX));
-        DrawVertical(x, 2, 89, 255, 140, alpha);
-    }
-    for (int i = 0; i <= cellsY; ++i) {
-        const int y = static_cast<int>(std::lround(
-            static_cast<double>(i) * (height - 1) / cellsY));
-        DrawHorizontal(y, 2, 89, 255, 140, alpha);
+    switch (state.patternType) {
+    case TestPattern::GeometryGrid:
+        for (int i = 0; i <= cellsX; ++i) {
+            const int x = static_cast<int>(std::lround(
+                static_cast<double>(i) * (width - 1) / cellsX));
+            DrawVertical(x, 2, 89, 255, 140, alpha);
+        }
+        for (int i = 0; i <= cellsY; ++i) {
+            const int y = static_cast<int>(std::lround(
+                static_cast<double>(i) * (height - 1) / cellsY));
+            DrawHorizontal(y, 2, 89, 255, 140, alpha);
+        }
+        DrawVertical(width / 2, 3, 89, 255, 140, alpha);
+        DrawHorizontal(height / 2, 3, 89, 255, 140, alpha);
+        DrawVertical(0, 3, 255, 89, 89, alpha);
+        DrawVertical(width - 1, 3, 255, 89, 89, alpha);
+        DrawHorizontal(0, 3, 255, 89, 89, alpha);
+        DrawHorizontal(height - 1, 3, 255, 89, 89, alpha);
+        break;
+
+    case TestPattern::ColourBars: {
+        static constexpr unsigned char colours[8][3] = {
+            { 255, 255, 255 }, { 255, 255,   0 }, {   0, 255, 255 }, {   0, 255,   0 },
+            { 255,   0, 255 }, { 255,   0,   0 }, {   0,   0, 255 }, {   0,   0,   0 },
+        };
+        for (int x = 0; x < width; ++x) {
+            const int bar = std::min(7, x * 8 / std::max(1, width));
+            for (int y = 0; y < height; ++y)
+                BlendPixel(x, y, colours[bar][0], colours[bar][1], colours[bar][2], alpha);
+        }
+        break;
     }
 
-    DrawVertical(width / 2, 3, 89, 255, 140, alpha);
-    DrawHorizontal(height / 2, 3, 89, 255, 140, alpha);
-    DrawVertical(0, 3, 255, 89, 89, alpha);
-    DrawVertical(width - 1, 3, 255, 89, 89, alpha);
-    DrawHorizontal(0, 3, 255, 89, 89, alpha);
-    DrawHorizontal(height - 1, 3, 255, 89, 89, alpha);
+    case TestPattern::Greyscale:
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                // The bottom quarter uses sixteen fixed steps.
+                const int value = y >= height * 3 / 4
+                    ? std::min(15, x * 16 / std::max(1, width)) * 17
+                    : x * 255 / std::max(1, width - 1);
+                BlendPixel(x, y, static_cast<unsigned char>(value),
+                           static_cast<unsigned char>(value),
+                           static_cast<unsigned char>(value), alpha);
+            }
+        }
+        break;
+
+    case TestPattern::Convergence: {
+        const int fineX = cellsX * 2;
+        const int fineY = cellsY * 2;
+        for (int y = 0; y < height; ++y) {
+            const int gy = y * fineY;
+            const bool horizontal = gy % std::max(1, height) < fineY;
+            for (int x = 0; x < width; ++x) {
+                const int gx = x * fineX;
+                const bool vertical = gx % std::max(1, width) < fineX;
+                const unsigned char value = vertical || horizontal ? 255 : 0;
+                BlendPixel(x, y, value, value, value, alpha);
+            }
+        }
+        break;
+    }
+
+    case TestPattern::Sharpness:
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const unsigned char value = ((x + y) & 1) ? 255 : 0;
+                BlendPixel(x, y, value, value, value, alpha);
+            }
+        }
+        break;
+
+    case TestPattern::Overscan:
+        BlendFrame(0, 0, 0, alpha);
+        DrawVertical(0, 3, 255, 64, 64, alpha);
+        DrawVertical(width - 1, 3, 255, 64, 64, alpha);
+        DrawHorizontal(0, 3, 255, 64, 64, alpha);
+        DrawHorizontal(height - 1, 3, 255, 64, 64, alpha);
+        DrawVertical(width * 5 / 100, 2, 64, 255, 64, alpha);
+        DrawVertical(width * 95 / 100, 2, 64, 255, 64, alpha);
+        DrawHorizontal(height * 5 / 100, 2, 64, 255, 64, alpha);
+        DrawHorizontal(height * 95 / 100, 2, 64, 255, 64, alpha);
+        DrawVertical(width * 10 / 100, 2, 64, 128, 255, alpha);
+        DrawVertical(width * 90 / 100, 2, 64, 128, 255, alpha);
+        DrawHorizontal(height * 10 / 100, 2, 64, 128, 255, alpha);
+        DrawHorizontal(height * 90 / 100, 2, 64, 128, 255, alpha);
+        DrawVertical(width / 2, 2, 255, 255, 255, alpha);
+        DrawHorizontal(height / 2, 2, 255, 255, 255, alpha);
+        break;
+
+    default:
+        break;
+    }
 }
 
 bool WarpEngine::Impl::CaptureFrame() {
@@ -450,6 +561,8 @@ bool WarpEngine::Impl::CaptureFrame() {
         if (!loggedCaptureFailure) LogLine(L"XP GDI BitBlt failed; overlay stays hidden");
         loggedCaptureFailure = true;
         captureWasBlank = false;
+        blankSince = 0;
+        goodSince = 0;
         needReinit = true;
         return false;
     }
@@ -457,18 +570,32 @@ bool WarpEngine::Impl::CaptureFrame() {
         if (!loggedCaptureFailure) LogLine(L"XP GdiFlush failed; rebuilding capture resources");
         loggedCaptureFailure = true;
         captureWasBlank = false;
+        blankSince = 0;
+        goodSince = 0;
         needReinit = true;
         return false;
     }
     loggedCaptureFailure = false;
 
     if (state.patternMode == 0 && CaptureIsBlank()) {
-        if (!captureWasBlank)
-            LogLine(L"XP GDI capture is blank; overlay stays hidden");
+        const DWORD now = GetTickCount();
+        if (!captureWasBlank &&
+            (lastCaptureLog == 0 || now - lastCaptureLog >= 5000)) {
+            LogLine(L"XP GDI capture is blank; holding the last good frame");
+            lastCaptureLog = now;
+        }
         captureWasBlank = true;
+        goodSince = 0;
+        if (blankSince == 0) blankSince = now;
         return false;
     }
-    if (captureWasBlank) LogLine(L"XP GDI capture recovered");
+    if (captureWasBlank) {
+        const DWORD now = GetTickCount();
+        if (lastCaptureLog == 0 || now - lastCaptureLog >= 5000) {
+            LogLine(L"XP GDI capture recovered");
+            lastCaptureLog = now;
+        }
+    }
     captureWasBlank = false;
 
     ApplyPattern();
@@ -863,14 +990,34 @@ void WarpEngine::ThreadMain() {
         }
         lastFrameTick = tick;
 
-        if (!impl_->CaptureFrame()) {
+        const bool captured = impl_->CaptureFrame();
+        const DWORD captureTick = GetTickCount();
+        if (!captured) {
+            if (impl_->captureWasBlank && impl_->visible &&
+                captureTick - impl_->blankSince <= 2000) {
+                // The current D3D surface still contains the last good frame.
+                // Keep it up through a short capture gap instead of flashing
+                // the uncorrected desktop.
+                MsgWaitForMultipleObjectsEx(
+                    0, nullptr, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                continue;
+            }
+
             impl_->SetVisible(false);
             InterlockedExchange(&active_, 0);
             SetError(T(impl_->captureWasBlank ? Str::ErrCaptureBlank
                                               : Str::ErrDuplicationUnavailable));
-            MsgWaitForMultipleObjectsEx(0, nullptr, 250, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            MsgWaitForMultipleObjectsEx(
+                0, nullptr, 250, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             continue;
         }
+
+        if (!impl_->visible && impl_->blankSince != 0) {
+            if (impl_->goodSince == 0) impl_->goodSince = captureTick;
+            if (captureTick - impl_->goodSince < 500) continue;
+        }
+        impl_->blankSince = 0;
+        impl_->goodSince = 0;
 
         impl_->UploadGrid();
         if (!impl_->Draw()) {

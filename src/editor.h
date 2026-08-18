@@ -105,6 +105,7 @@ private:
     RECT PageArea() const;
     // Double-clicking a slider returns it to its default.
     static LRESULT CALLBACK SliderProcThunk(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
+    void ClearSliderClick();
     void ResetSliderToDefault(int id);
 
     void CreateControls(HWND hwnd);
@@ -151,12 +152,17 @@ private:
     HFONT       font_ = nullptr;
     int         dpi_  = 96;
     int         page_ = kPageGrid;
+    int         selectedCorner_ = 0;
 
     int  selRow_ = -1;
     int  selCol_ = -1;
     bool dragging_ = false;
     POINT dragOrigin_{};
     Offset dragStart_{};
+
+    HWND  lastSliderClick_ = nullptr;
+    DWORD lastSliderClickTime_ = 0;
+    POINT lastSliderClickPoint_{};
 
     std::vector<WarpMesh> undo_;
     bool suppressSync_ = false;

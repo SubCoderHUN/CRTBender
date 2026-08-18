@@ -112,6 +112,11 @@ g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
     -o "$WORK/i18n_tests" "$ROOT/tests/test_i18n.cpp" "$ROOT/src/i18n.cpp"
 "$WORK/i18n_tests" | tail -1
 
+echo "==> checking the embedded shader source"
+g++ -std=c++17 -O1 -Wall -Wextra -I "$ROOT/src" \
+    -o "$WORK/shader_source_tests" "$ROOT/tests/test_shader_source.cpp"
+"$WORK/shader_source_tests"
+
 echo
 ls -lh "$OUT/CRTBender.exe" \
        "$OUT/CRTBender-Win10-x64.exe" \

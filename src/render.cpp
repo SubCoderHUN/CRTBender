@@ -36,7 +36,8 @@ struct alignas(16) WarpConstants {
     float lineHalfW, borderW, patternOpacity, patternSolid;
     float gridR, gridG, gridB, gridA;
     float borderR, borderG, borderB, borderA;
-    float filterMode, convergence, pad0, pad1;
+    float filterMode, convergence, patternType, sharpness;
+    float outputResX, outputResY, outputPad0, outputPad1;
 };
 static_assert(sizeof(WarpConstants) % 16 == 0, "cbuffer must be 16-byte aligned");
 
@@ -54,9 +55,11 @@ bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& blob
                                   blob.Put(), errors.Put());
     if (FAILED(hr)) {
         if (errors && errors->GetBufferPointer()) {
+            const char* text = static_cast<const char*>(errors->GetBufferPointer());
+            size_t length = errors->GetBufferSize();
+            while (length > 0 && text[length - 1] == '\0') --length;
             LogLine(L"Shader compile error: " +
-                    Widen(std::string(static_cast<const char*>(errors->GetBufferPointer()),
-                                      errors->GetBufferSize())));
+                    Widen(std::string(text, length)));
         }
         LogHr(L"D3DCompile", hr);
         return false;
@@ -114,7 +117,12 @@ struct WarpEngine::Impl {
     bool  captureConfirmed   = false;
     DWORD lastCaptureCheck   = 0;
     DWORD blankSince         = 0;
+    DWORD goodSince          = 0;
+    DWORD lastCaptureLog     = 0;
     bool  loggedBlankWarning = false;
+    int   captureRecoveryFailures = 0;
+    bool  captureCircuitOpen = false;
+    DWORD healthyVisibleSince = 0;
 
     RenderState             state;
     std::vector<WarpVertex> verts;
@@ -129,6 +137,7 @@ struct WarpEngine::Impl {
     CaptureProbeResult ProbeCapture();
 
     bool CreateOverlayWindow(HINSTANCE inst);
+    bool RefreshCaptureExclusion();
     bool InitGraphics();
     void ShutdownGraphics();
     bool EnsureDuplication();
@@ -159,10 +168,32 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     case WM_DISPLAYCHANGE:
         if (impl) {
             LogLine(L"Display mode changed, reinitializing pipeline");
+            impl->SetVisible(false);
+            impl->RefreshCaptureExclusion();
             impl->needReinit = true;
+            impl->captureCircuitOpen = false;
+            impl->captureRecoveryFailures = 0;
+            impl->healthyVisibleSince = 0;
             if (impl->owner) impl->owner->OnDisplayChanged();
         }
         return 0;
+
+    case WM_POWERBROADCAST:
+        if (!impl) return TRUE;
+        if (wp == PBT_APMSUSPEND) {
+            impl->SetVisible(false);
+        } else if (wp == PBT_APMRESUMEAUTOMATIC ||
+                   wp == PBT_APMRESUMESUSPEND ||
+                   wp == PBT_APMRESUMECRITICAL) {
+            LogLine(L"System resumed, rebuilding capture pipeline");
+            impl->SetVisible(false);
+            impl->RefreshCaptureExclusion();
+            impl->needReinit = true;
+            impl->captureCircuitOpen = false;
+            impl->captureRecoveryFailures = 0;
+            impl->healthyVisibleSince = 0;
+        }
+        return TRUE;
 
     case WM_TIMER:
         if (wp == kTimerTopmost && impl && impl->visible) {
@@ -230,15 +261,34 @@ bool WarpEngine::Impl::CreateOverlayWindow(HINSTANCE inst) {
     if (!(exStyle & WS_EX_LAYERED) || !(exStyle & WS_EX_TRANSPARENT))
         return abandon(L"Overlay is not click-through (WS_EX_LAYERED|WS_EX_TRANSPARENT missing)");
 
-    // Without this the overlay captures itself and the picture recurses.
-    if (!SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE))
-        return abandon(L"SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) failed");
-
-    DWORD affinity = 0;
-    if (!GetWindowDisplayAffinity(hwnd, &affinity) || affinity != WDA_EXCLUDEFROMCAPTURE)
+    if (!RefreshCaptureExclusion())
         return abandon(L"Capture exclusion was not honoured by the system");
 
     SetTimer(hwnd, kTimerTopmost, 2000, nullptr);
+    return true;
+}
+
+bool WarpEngine::Impl::RefreshCaptureExclusion() {
+    if (!hwnd) return false;
+
+    // A display-driver reset or secure-desktop transition can leave the window
+    // reporting its old affinity while the compositor no longer honours it.
+    // Toggling the value forces DWM to rebuild the exclusion state.
+    if (!SetWindowDisplayAffinity(hwnd, 0)) {
+        LogLine(L"Could not clear stale window capture affinity");
+        return false;
+    }
+    if (!SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)) {
+        LogLine(L"Could not reapply WDA_EXCLUDEFROMCAPTURE");
+        return false;
+    }
+
+    DWORD affinity = 0;
+    if (!GetWindowDisplayAffinity(hwnd, &affinity) ||
+        affinity != WDA_EXCLUDEFROMCAPTURE) {
+        LogLine(L"Capture exclusion verification failed");
+        return false;
+    }
     return true;
 }
 
@@ -275,11 +325,14 @@ void WarpEngine::Impl::ShutdownGraphics() {
     duplicationFailures = 0;
     lastCaptureCheck    = 0;
     blankSince          = 0;
+    goodSince           = 0;
+    lastCaptureLog      = 0;
     loggedBlankWarning  = false;
 }
 
 bool WarpEngine::Impl::InitGraphics() {
     ShutdownGraphics();
+    if (!RefreshCaptureExclusion()) return false;
 
     ComPtr<IDXGIFactory1> factory;
     HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), factory.PutVoid());
@@ -483,6 +536,7 @@ bool WarpEngine::Impl::EnsureSourceTexture(ID3D11Texture2D* frame) {
     captureConfirmed = false;
     lastCaptureCheck = 0;
     blankSince = 0;
+    goodSince = 0;
 
     wchar_t msg[192];
     swprintf(msg, std::size(msg),
@@ -563,7 +617,9 @@ CaptureProbeResult WarpEngine::Impl::ProbeCapture() {
     const bool blank = nonBlack == 0;
     const bool logTransition = (blank && !loggedBlankWarning) ||
                                (!blank && !captureConfirmed);
-    if (logTransition) {
+    const DWORD now = GetTickCount();
+    if (logTransition &&
+        (lastCaptureLog == 0 || now - lastCaptureLog >= 5000)) {
         wchar_t msg[224];
         swprintf(msg, std::size(msg),
                  L"Capture check: %u/%u non-black pixels across 3 patches of a %ux%u frame - %ls",
@@ -571,6 +627,7 @@ CaptureProbeResult WarpEngine::Impl::ProbeCapture() {
                  blank ? L"BLANK, the problem is upstream of the warp"
                        : L"good");
         LogLine(msg);
+        lastCaptureLog = now;
     }
     loggedBlankWarning = blank;
     return blank ? CaptureProbeResult::Blank : CaptureProbeResult::Good;
@@ -601,6 +658,7 @@ bool WarpEngine::Impl::EnsureDuplication() {
     captureConfirmed = false;
     lastCaptureCheck = 0;
     blankSince       = 0;
+    goodSince        = 0;
     return true;
 }
 
@@ -701,6 +759,10 @@ bool WarpEngine::Impl::Draw() {
     c.borderR = 1.0f; c.borderG = 0.35f; c.borderB = 0.35f; c.borderA = 1.0f;
     c.filterMode  = static_cast<float>(state.quality);
     c.convergence = state.convergence.Any() ? 1.0f : 0.0f;
+    c.patternType = static_cast<float>(state.patternType);
+    c.sharpness   = std::clamp(state.sharpness, 0.0f, 1.0f);
+    c.outputResX  = static_cast<float>(width);
+    c.outputResY  = static_cast<float>(height);
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(ctx->Map(cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -898,7 +960,16 @@ void WarpEngine::ThreadMain() {
         const uint32_t version = version_.load(std::memory_order_acquire);
         if (version != applied) {
             std::lock_guard<std::mutex> lock(stateMutex_);
+            const bool wasRequested =
+                impl_->state.enabled || impl_->state.patternMode != 0;
             impl_->state = pending_;
+            const bool isRequested =
+                impl_->state.enabled || impl_->state.patternMode != 0;
+            if (!wasRequested && isRequested) {
+                impl_->captureCircuitOpen = false;
+                impl_->captureRecoveryFailures = 0;
+                impl_->healthyVisibleSince = 0;
+            }
             applied      = version;
             impl_->gridDirty = true;
             impl_->forceDraw = true;
@@ -912,6 +983,15 @@ void WarpEngine::ThreadMain() {
             impl_->haveFrame = false;
             active_.store(false);
             MsgWaitForMultipleObjectsEx(0, nullptr, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            continue;
+        }
+
+        if (impl_->captureCircuitOpen) {
+            impl_->SetVisible(false);
+            active_.store(false);
+            SetError(T(Str::ErrCaptureBlank));
+            MsgWaitForMultipleObjectsEx(
+                0, nullptr, 500, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             continue;
         }
 
@@ -997,6 +1077,7 @@ void WarpEngine::ThreadMain() {
             // legitimate source as a pipeline failure.
             impl_->captureConfirmed = true;
             impl_->blankSince       = 0;
+            impl_->goodSince        = 0;
             SetError(L"");
         } else if (impl_->haveFrame) {
             const DWORD tick = GetTickCount();
@@ -1019,19 +1100,47 @@ void WarpEngine::ThreadMain() {
                 }
                 if (probe == CaptureProbeResult::Blank) {
                     impl_->captureConfirmed = false;
+                    impl_->goodSince = 0;
+                    impl_->healthyVisibleSince = 0;
                     if (impl_->blankSince == 0) impl_->blankSince = tick;
-                    // Hiding immediately is the fail-safe: a brief correction
-                    // dropout is preferable to trapping the user behind black.
-                    impl_->SetVisible(false);
-                    active_.store(false);
+
+                    // Keep the last successfully presented frame through short
+                    // capture gaps. Hiding immediately creates a feedback loop
+                    // when a resumed compositor alternates between blank while
+                    // visible and healthy while hidden.
                     if (tick - impl_->blankSince > 2000) {
+                        if (impl_->visible) {
+                            impl_->SetVisible(false);
+                            active_.store(false);
+                            ++impl_->captureRecoveryFailures;
+                            if (!impl_->RefreshCaptureExclusion()) {
+                                impl_->needReinit = true;
+                                nextRetryTick = tick + 500;
+                            }
+                            if (impl_->captureRecoveryFailures >= 2) {
+                                impl_->captureCircuitOpen = true;
+                                LogLine(L"Capture recovery stopped after repeated blank-overlay feedback");
+                            }
+                        }
                         SetError(T(Str::ErrCaptureBlank));
                     }
                     continue;
                 }
 
+                if (!impl_->visible && impl_->blankSince != 0) {
+                    if (impl_->goodSince == 0) impl_->goodSince = tick;
+                    if (tick - impl_->goodSince < 500) continue;
+                    impl_->forceDraw = true;
+                }
                 impl_->captureConfirmed = true;
                 impl_->blankSince       = 0;
+                impl_->goodSince        = 0;
+                if (impl_->visible) {
+                    if (impl_->healthyVisibleSince == 0)
+                        impl_->healthyVisibleSince = tick;
+                    if (tick - impl_->healthyVisibleSince >= 5000)
+                        impl_->captureRecoveryFailures = 0;
+                }
                 SetError(L"");
             }
         }

@@ -38,6 +38,12 @@ enum : int {
     IDM_PATTERN_OFF,
     IDM_PATTERN_OVER,
     IDM_PATTERN_SOLID,
+    IDM_PATTERN_GEOMETRY,
+    IDM_PATTERN_COLOUR_BARS,
+    IDM_PATTERN_GREYSCALE,
+    IDM_PATTERN_CONVERGENCE,
+    IDM_PATTERN_SHARPNESS,
+    IDM_PATTERN_OVERSCAN,
     IDM_AUTOSTART,
     IDM_OPEN_CONFIG,
     IDM_OPEN_LOG,
@@ -57,6 +63,7 @@ enum : int {
 
 constexpr UINT kTimerPoll   = 1;   // monitor set / mode changes, engine health
 constexpr UINT kTimerBypass = 2;   // protected-content watcher, needs to be quick
+constexpr DWORD kBypassConfirmMs = 800;
 
 #ifndef WDA_NONE
 #define WDA_NONE 0x00000000
@@ -70,6 +77,42 @@ bool HasCaptureAffinity(HWND hwnd) {
 
     DWORD affinity = WDA_NONE;
     return getAffinity(hwnd, &affinity) && affinity != WDA_NONE;
+}
+
+bool IsLargeCaptureExcludedWindow(HWND hwnd, int& coveragePercent,
+                                  HMONITOR& coveredMonitor) {
+    coveragePercent = 0;
+    coveredMonitor = nullptr;
+    if (!hwnd || !IsWindowVisible(hwnd) || !HasCaptureAffinity(hwnd)) return false;
+
+    RECT windowRect{};
+    if (!GetWindowRect(hwnd, &windowRect)) return false;
+
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    const HMONITOR handle = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    if (!handle || !GetMonitorInfoW(handle, &monitor)) return false;
+    coveredMonitor = handle;
+
+    RECT visible{};
+    if (!IntersectRect(&visible, &windowRect, &monitor.rcMonitor)) return false;
+
+    const long long windowWidth  = std::max(0L, visible.right - visible.left);
+    const long long windowHeight = std::max(0L, visible.bottom - visible.top);
+    const long long monitorWidth =
+        std::max(1L, monitor.rcMonitor.right - monitor.rcMonitor.left);
+    const long long monitorHeight =
+        std::max(1L, monitor.rcMonitor.bottom - monitor.rcMonitor.top);
+    const long long windowArea  = windowWidth * windowHeight;
+    const long long monitorArea = monitorWidth * monitorHeight;
+    coveragePercent = static_cast<int>(windowArea * 100 / monitorArea);
+
+    // Capture-excluded menus, password popups and tooltips are common in
+    // browsers. Only a substantial foreground window can black out enough of
+    // the desktop to justify removing correction from the whole monitor.
+    return windowWidth * 2 >= monitorWidth &&
+           windowHeight * 2 >= monitorHeight &&
+           windowArea * 4 >= monitorArea;
 }
 
 } // namespace
@@ -126,7 +169,9 @@ private:
 
     // Auto-bypass state, driven by the fast timer.
     bool         bypassActive_ = false;
-    bool         bypassProtected_ = false;
+    HMONITOR     bypassMonitor_ = nullptr;
+    HWND         bypassCandidate_ = nullptr;
+    DWORD        bypassCandidateSince_ = 0;
 
     UINT         taskbarCreatedMsg_ = 0;
     bool         warnedAboutError_  = false;
@@ -177,13 +222,17 @@ void App::PushStates() {
         state.geometry       = profile.geometry;
         state.convergence    = profile.convergence;
         state.enabled        = s.enabled;
-        state.bypass         = bypassActive_;
+        const HMONITOR monitorHandle =
+            MonitorFromRect(&monitor.rect, MONITOR_DEFAULTTONULL);
+        state.bypass         = bypassActive_ && monitorHandle == bypassMonitor_;
         state.overscan       = profile.overscan;
         state.edgeBleed      = EffectiveEdgeBleed(profile, monitor.width, monitor.height);
         state.patternMode    = s.patternMode;
+        state.patternType    = s.patternType;
         state.patternCells   = s.patternCells;
         state.patternOpacity = static_cast<float>(s.patternOpacityPct) / 100.0f;
         state.quality        = s.quality;
+        state.sharpness      = static_cast<float>(s.sharpnessPct) / 100.0f;
         state.flipModel      = s.flipPresent;
         state.aspect         = monitor.height > 0
             ? static_cast<float>(monitor.width) / static_cast<float>(monitor.height)
@@ -281,22 +330,45 @@ void App::UpdateBypass() {
     const Settings& s = config_.GetSettings();
 
     bool wantBypass = false;
+    int coveragePercent = 0;
+    HWND candidate = nullptr;
+    HMONITOR candidateMonitor = nullptr;
     if (s.autoBypass) {
-        // A window that excludes itself from capture - a DRM video player, or
-        // anything else using SetWindowDisplayAffinity - would come through the
-        // capture as solid black. Rather than blanking the user's screen, step
-        // aside for as long as it is in the foreground.
         if (HWND foreground = GetForegroundWindow()) {
-            wantBypass = HasCaptureAffinity(foreground);
+            if (IsLargeCaptureExcludedWindow(
+                    foreground, coveragePercent, candidateMonitor))
+                candidate = foreground;
         }
     }
 
-    if (wantBypass == bypassActive_) return;
+    const DWORD now = GetTickCount();
+    if (!candidate) {
+        bypassCandidate_ = nullptr;
+        bypassCandidateSince_ = 0;
+    } else if (candidate != bypassCandidate_) {
+        bypassCandidate_ = candidate;
+        bypassCandidateSince_ = now;
+        wantBypass = bypassActive_;
+    } else if (bypassActive_ ||
+               now - bypassCandidateSince_ >= kBypassConfirmMs) {
+        wantBypass = true;
+    }
 
-    bypassActive_    = wantBypass;
-    bypassProtected_ = wantBypass;
-    LogLine(wantBypass ? L"Auto-bypass on: protected content in the foreground"
-                       : L"Auto-bypass off");
+    const bool monitorChanged =
+        wantBypass && candidateMonitor != bypassMonitor_;
+    if (wantBypass == bypassActive_ && !monitorChanged) return;
+
+    bypassActive_ = wantBypass;
+    bypassMonitor_ = wantBypass ? candidateMonitor : nullptr;
+    if (wantBypass) {
+        wchar_t line[160];
+        swprintf(line, std::size(line),
+                 L"Auto-bypass on: capture-excluded foreground window covers %d%% of its monitor",
+                 coveragePercent);
+        LogLine(line);
+    } else {
+        LogLine(L"Auto-bypass off");
+    }
     PushStates();
     UpdateTrayTooltip();
     if (editor_.IsOpen()) editor_.Refresh();
@@ -387,6 +459,20 @@ void App::ShowTrayMenu() {
                 IDM_PATTERN_OVER, T(Str::TrayPatternOverDesktop));
     AppendMenuW(pattern, MF_STRING | (s.patternMode == 2 ? MF_CHECKED : 0),
                 IDM_PATTERN_SOLID, T(Str::TrayPatternOnBlack));
+    AppendMenuW(pattern, MF_SEPARATOR, 0, nullptr);
+    static const Str kPatternNames[kTestPatternCount] = {
+        Str::PatternGeometryGrid,
+        Str::PatternColourBars,
+        Str::PatternGreyscale,
+        Str::PatternConvergence,
+        Str::PatternSharpness,
+        Str::PatternOverscan,
+    };
+    for (int i = 0; i < kTestPatternCount; ++i) {
+        const UINT id = static_cast<UINT>(IDM_PATTERN_GEOMETRY + i);
+        const UINT checked = static_cast<int>(s.patternType) == i ? MF_CHECKED : 0;
+        AppendMenuW(pattern, MF_STRING | checked, id, T(kPatternNames[i]));
+    }
 
     HMENU language = CreatePopupMenu();
     AppendMenuW(language, MF_STRING | (s.language == Lang::English ? MF_CHECKED : 0),
@@ -509,6 +595,17 @@ LRESULT App::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_PATTERN_OVER:
         case IDM_PATTERN_SOLID:
             s.patternMode = LOWORD(wp) - IDM_PATTERN_OFF;
+            OnEditorChanged(true);
+            if (editor_.IsOpen()) editor_.Refresh();
+            return 0;
+        case IDM_PATTERN_GEOMETRY:
+        case IDM_PATTERN_COLOUR_BARS:
+        case IDM_PATTERN_GREYSCALE:
+        case IDM_PATTERN_CONVERGENCE:
+        case IDM_PATTERN_SHARPNESS:
+        case IDM_PATTERN_OVERSCAN:
+            s.patternType =
+                TestPatternFromIndex(LOWORD(wp) - IDM_PATTERN_GEOMETRY);
             OnEditorChanged(true);
             if (editor_.IsOpen()) editor_.Refresh();
             return 0;

@@ -99,6 +99,46 @@ constexpr ConvergenceField kConvergenceFields[] = {
     { "bvedge", &ConvergenceParams::bVEdge },
 };
 
+struct CornerConvergenceField {
+    const char*  name;
+    ScreenCorner corner;
+    bool         red;
+    bool         horizontal;
+};
+
+constexpr CornerConvergenceField kCornerConvergenceFields[] = {
+    { "red_top_left_h",      ScreenCorner::TopLeft,     true,  true  },
+    { "red_top_left_v",      ScreenCorner::TopLeft,     true,  false },
+    { "red_top_right_h",     ScreenCorner::TopRight,    true,  true  },
+    { "red_top_right_v",     ScreenCorner::TopRight,    true,  false },
+    { "red_bottom_left_h",   ScreenCorner::BottomLeft,  true,  true  },
+    { "red_bottom_left_v",   ScreenCorner::BottomLeft,  true,  false },
+    { "red_bottom_right_h",  ScreenCorner::BottomRight, true,  true  },
+    { "red_bottom_right_v",  ScreenCorner::BottomRight, true,  false },
+    { "blue_top_left_h",     ScreenCorner::TopLeft,     false, true  },
+    { "blue_top_left_v",     ScreenCorner::TopLeft,     false, false },
+    { "blue_top_right_h",    ScreenCorner::TopRight,    false, true  },
+    { "blue_top_right_v",    ScreenCorner::TopRight,    false, false },
+    { "blue_bottom_left_h",  ScreenCorner::BottomLeft,  false, true  },
+    { "blue_bottom_left_v",  ScreenCorner::BottomLeft,  false, false },
+    { "blue_bottom_right_h", ScreenCorner::BottomRight, false, true  },
+    { "blue_bottom_right_v", ScreenCorner::BottomRight, false, false },
+};
+
+float& CornerConvergenceValue(ConvergenceParams& convergence,
+                              const CornerConvergenceField& field) {
+    Offset& corner = field.red ? convergence.RedCorner(field.corner)
+                               : convergence.BlueCorner(field.corner);
+    return field.horizontal ? corner.dx : corner.dy;
+}
+
+const float& CornerConvergenceValue(const ConvergenceParams& convergence,
+                                    const CornerConvergenceField& field) {
+    const Offset& corner = field.red ? convergence.RedCorner(field.corner)
+                                     : convergence.BlueCorner(field.corner);
+    return field.horizontal ? corner.dx : corner.dy;
+}
+
 } // namespace
 
 bool Profile::Touched() const {
@@ -189,6 +229,8 @@ void Config::Load() {
             if      (key == "enabled")         settings_.enabled       = ParseBool(val, settings_.enabled);
             else if (key == "autostart")       settings_.autostart     = ParseBool(val, settings_.autostart);
             else if (key == "pattern_mode")    settings_.patternMode   = std::clamp(ParseInt(val, 0), 0, 2);
+            else if (key == "pattern_type")    settings_.patternType   =
+                TestPatternFromIndex(ParseInt(val, 0));
             else if (key == "mirror")          settings_.mirror        = ParseBool(val, settings_.mirror);
             else if (key == "free_move")       settings_.freeMove      = ParseBool(val, settings_.freeMove);
             else if (key == "hotkeys")         settings_.hotkeys       = ParseBool(val, settings_.hotkeys);
@@ -197,6 +239,8 @@ void Config::Load() {
             // config does not silently lose the setting.
             else if (key == "bicubic")         settings_.quality       = ParseBool(val, true) ? 1 : 0;
             else if (key == "quality")         settings_.quality       = std::clamp(ParseInt(val, 2), 0, 2);
+            else if (key == "sharpness")       settings_.sharpnessPct  =
+                std::clamp(ParseInt(val, 40), 0, 100);
             else if (key == "language")        settings_.language      = LanguageFromTag(ConfigValue(val).c_str());
             else if (key == "present_mode")    settings_.flipPresent   = (ConfigValue(val) == "flip");
             else if (key == "preview_gain")    settings_.previewGain   = std::clamp(ParseInt(val, 8), 1, 24);
@@ -219,11 +263,22 @@ void Config::Load() {
             }
         } else if (key.rfind("conv.", 0) == 0) {
             const std::string name = key.substr(5);
+            bool matched = false;
             for (const ConvergenceField& field : kConvergenceFields) {
                 if (name == field.name) {
                     profile->convergence.*(field.member) =
                         std::clamp(ParseFloat(val, 0.0f), -0.05f, 0.05f);
+                    matched = true;
                     break;
+                }
+            }
+            if (!matched) {
+                for (const CornerConvergenceField& field : kCornerConvergenceFields) {
+                    if (name == field.name) {
+                        CornerConvergenceValue(profile->convergence, field) =
+                            std::clamp(ParseFloat(val, 0.0f), -0.05f, 0.05f);
+                        break;
+                    }
                 }
             }
         } else if (key == "overscan") {
@@ -285,6 +340,8 @@ bool Config::Save() const {
     out += Fmt("enabled         = %d\n", settings_.enabled ? 1 : 0);
     out += Fmt("autostart       = %d\n", settings_.autostart ? 1 : 0);
     out += Fmt("pattern_mode    = %d       # %s\n", settings_.patternMode, T8(Str::CfgPatternMode));
+    out += Fmt("pattern_type    = %d       # %s\n",
+               static_cast<int>(settings_.patternType), T8(Str::CfgPatternType));
     out += Fmt("pattern_cells   = %d\n", settings_.patternCells);
     out += Fmt("pattern_opacity = %d\n", settings_.patternOpacityPct);
     out += Fmt("mirror          = %d       # %s\n", settings_.mirror ? 1 : 0, T8(Str::CfgMirror));
@@ -293,6 +350,8 @@ bool Config::Save() const {
     out += Fmt("auto_bypass     = %d       # %s\n", settings_.autoBypass ? 1 : 0,
                T8(Str::CfgAutoBypass));
     out += Fmt("quality         = %d       # %s\n", settings_.quality, T8(Str::CfgQuality));
+    out += Fmt("sharpness       = %d       # %s\n",
+               settings_.sharpnessPct, T8(Str::CfgSharpness));
     out += Fmt("present_mode    = %-6s  # %s\n",
                settings_.flipPresent ? "flip" : "bitblt", T8(Str::CfgPresentMode));
     out += Fmt("preview_gain    = %d       # %s\n", settings_.previewGain, T8(Str::CfgPreviewGain));
@@ -333,6 +392,11 @@ bool Config::Save() const {
                 const float value = profile.convergence.*(field.member);
                 if (std::fabs(value) > 1e-7f)
                     out += Fmt("conv.%-13s = %+.6f\n", field.name, value);
+            }
+            for (const CornerConvergenceField& field : kCornerConvergenceFields) {
+                const float value = CornerConvergenceValue(profile.convergence, field);
+                if (std::fabs(value) > 1e-7f)
+                    out += Fmt("conv.%-19s = %+.6f\n", field.name, value);
             }
         }
 

@@ -159,6 +159,40 @@ int main() {
         CheckNear(blue.dy, -0.002f, 1e-6f, "and inverted at the top");
     }
 
+    std::printf("\n== per-corner convergence stays local ==\n");
+    {
+        ConvergenceParams c;
+        c.RedCorner(ScreenCorner::TopLeft) = Offset{ 0.003f, -0.002f };
+        c.BlueCorner(ScreenCorner::BottomRight) = Offset{ -0.001f, 0.004f };
+        Check(c.Any(), "Any() notices a corner adjustment");
+
+        Offset red, blue;
+        c.At(0.0f, 0.0f, red, blue);
+        CheckNear(red.dx, 0.003f, 1e-6f, "red reaches full strength at its corner");
+        CheckNear(red.dy, -0.002f, 1e-6f, "both red axes reach the corner");
+        CheckNear(blue.dx, 0.0f, 1e-6f, "the opposite blue corner stays out");
+
+        c.At(1.0f, 1.0f, red, blue);
+        CheckNear(blue.dx, -0.001f, 1e-6f, "blue reaches its own corner");
+        CheckNear(blue.dy, 0.004f, 1e-6f, "both blue axes reach the corner");
+        CheckNear(red.dx, 0.0f, 1e-6f, "the opposite red corner stays out");
+
+        c.At(0.5f, 0.5f, red, blue);
+        CheckNear(red.dx, 0.0f, 1e-6f, "corner red is exactly zero at the centre");
+        CheckNear(blue.dy, 0.0f, 1e-6f, "corner blue is exactly zero at the centre");
+
+        c.At(0.25f, 0.25f, red, blue);
+        CheckNear(red.dx, 0.003f / 16.0f, 1e-6f, "the corner fades smoothly inwards");
+
+        float maxDx = 0.0f, maxDy = 0.0f;
+        c.MaxMagnitude(maxDx, maxDy);
+        CheckNear(maxDx, 0.003f, 1e-6f, "maximum horizontal corner offset is included");
+        CheckNear(maxDy, 0.004f, 1e-6f, "maximum vertical corner offset is included");
+
+        c.Reset();
+        Check(!c.Any(), "Reset clears every corner");
+    }
+
     std::printf("\n== the layers add without disturbing each other ==\n");
     {
         // A parametric slider and a hand-tuned point must sum, and neither may
@@ -199,6 +233,8 @@ int main() {
         ConvergenceParams conv;
         conv.rH = 0.0015f;
         conv.bV = -0.0020f;
+        conv.RedCorner(ScreenCorner::TopLeft) = Offset{ 0.0020f, 0.0010f };
+        conv.BlueCorner(ScreenCorner::BottomRight) = Offset{ -0.0010f, 0.0030f };
 
         constexpr int tess = 16;
         WarpBuildParams params;
@@ -215,6 +251,19 @@ int main() {
         CheckNear(centre.rdx, 0.0015f, 1e-6f, "red offset lands in the vertex");
         CheckNear(centre.bdy, -0.0020f, 1e-6f, "blue offset lands in the vertex");
         CheckNear(centre.rdy, 0.0f, 1e-6f, "unset components stay zero");
+
+        const WarpVertex& topLeft = verts[1 * stride + 1];
+        CheckNear(topLeft.rdx, 0.0035f, 1e-6f,
+                  "top-left red corner is added to the uniform offset");
+        CheckNear(topLeft.rdy, 0.0010f, 1e-6f,
+                  "top-left red vertical corner reaches the vertex");
+
+        const WarpVertex& bottomRight =
+            verts[(stride - 2) * stride + (stride - 2)];
+        CheckNear(bottomRight.bdx, -0.0010f, 1e-6f,
+                  "bottom-right blue corner reaches the vertex");
+        CheckNear(bottomRight.bdy, 0.0010f, 1e-6f,
+                  "bottom-right blue corner adds to the uniform offset");
 
         // Without a convergence block the attributes must be zeroed, or stale
         // values would linger from a previous build.

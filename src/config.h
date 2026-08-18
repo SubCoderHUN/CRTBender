@@ -20,16 +20,36 @@
 
 namespace crtb {
 
+enum class TestPattern {
+    GeometryGrid = 0,
+    ColourBars,
+    Greyscale,
+    Convergence,
+    Sharpness,
+    Overscan,
+    Count,
+};
+
+constexpr int kTestPatternCount = static_cast<int>(TestPattern::Count);
+
+inline TestPattern TestPatternFromIndex(int index) {
+    if (index < 0) index = 0;
+    if (index >= kTestPatternCount) index = kTestPatternCount - 1;
+    return static_cast<TestPattern>(index);
+}
+
 struct Settings {
     bool enabled       = true;   // master on/off for the correction
     bool autostart     = false;  // mirrored into the HKCU Run key
     int  patternMode   = 0;      // 0 = off, 1 = over desktop, 2 = on black
+    TestPattern patternType = TestPattern::GeometryGrid;
     bool mirror        = true;   // edit left/right symmetrically
     bool freeMove      = false;  // allow horizontal control point movement
     bool hotkeys       = true;   // register the global calibration hotkeys
     bool autoBypass    = true;   // step aside for protected video and exclusive fullscreen
     Lang language      = Lang::English;
-    int  quality       = 2;      // 0 = bilinear, 1 = bicubic, 2 = Lanczos + anti-ringing
+    int  quality       = 2;      // 0 = bilinear, 1 = bicubic, 2 = adaptive sharp
+    int  sharpnessPct  = 40;     // adaptive sharpening used by quality mode 2
     bool flipPresent   = false;  // present_mode: false = bitblt, true = flip
     int  previewGain   = 8;      // editor-only magnification of the deformation
     int  tessellation  = 96;     // interior subdivisions per axis

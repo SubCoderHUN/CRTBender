@@ -46,10 +46,12 @@ struct RenderState {
     float overscan       = 1.0f;
     float edgeBleed      = 0.0f;   // normalized units
     int   patternMode    = 0;      // 0 off, 1 over desktop, 2 on black
+    TestPattern patternType = TestPattern::GeometryGrid;
     int   patternCells   = 8;
     float patternOpacity = 0.85f;
     int   tessellation   = 96;
-    int   quality        = 2;      // 0 bilinear, 1 bicubic, 2 Lanczos + anti-ringing
+    int   quality        = 2;      // 0 bilinear, 1 bicubic, 2 adaptive sharp
+    float sharpness      = 0.40f;  // adaptive detail recovery in quality mode 2
     // false = BitBlt present (required for the layered click-through overlay),
     // true = flip model. Read only when the pipeline is (re)initialized.
     bool  flipModel      = false;

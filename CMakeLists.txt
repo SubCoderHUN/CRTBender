@@ -120,5 +120,8 @@ target_include_directories(geometry_tests PRIVATE src)
 add_executable(config_tests EXCLUDE_FROM_ALL tests/test_config.cpp)
 target_include_directories(config_tests PRIVATE src)
 
+add_executable(shader_source_tests EXCLUDE_FROM_ALL tests/test_shader_source.cpp)
+target_include_directories(shader_source_tests PRIVATE src)
+
 install(TARGETS CRTBender RUNTIME DESTINATION .)
 install(FILES README.md DESTINATION .)

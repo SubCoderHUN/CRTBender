@@ -14,6 +14,7 @@
 //
 //   g++ -std=c++17 -I../src -o config_tests test_config.cpp && ./config_tests
 #include "cfgvalue.h"
+#include "config.h"
 
 #include <cstdio>
 #include <string>
@@ -74,6 +75,14 @@ int main() {
     CheckInt(ParseConfigInt("oops", 7), 7, "garbage keeps the fallback");
     CheckInt(ParseConfigInt("12x", 7), 7, "trailing garbage keeps the fallback");
     CheckInt(ParseConfigInt("", 7), 7, "empty keeps the fallback");
+
+    std::printf("\n== test pattern indices ==\n");
+    CheckInt(static_cast<int>(TestPatternFromIndex(0)),
+             static_cast<int>(TestPattern::GeometryGrid), "first pattern is the geometry grid");
+    CheckInt(static_cast<int>(TestPatternFromIndex(5)),
+             static_cast<int>(TestPattern::Overscan), "last pattern is the overscan guide");
+    CheckInt(static_cast<int>(TestPatternFromIndex(99)),
+             static_cast<int>(TestPattern::Overscan), "large indices clamp to the last pattern");
 
     {
         const float got = ParseConfigFloat("+0.004250  # topbow", 0.0f);
