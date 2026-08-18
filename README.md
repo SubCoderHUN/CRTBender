@@ -21,17 +21,19 @@ service menu. Separate builds support Windows 10/11 and Windows XP.
 
 - Centre, edge and per-corner RGB convergence correction for coloured fringes.
 <img width="345" height="288" alt="image" src="https://github.com/user-attachments/assets/14cfe8ec-2b8e-4c9d-9ab2-8c22df9a95ea" />
+<img width="343" height="513" alt="image" src="https://github.com/user-attachments/assets/28e74eda-6200-481d-9b7e-4982c914dd56" />
 
 - Selective adaptive sharpening keeps warped text crisp without sharpening
   untouched parts of the desktop.
-<img width="343" height="513" alt="image" src="https://github.com/user-attachments/assets/28e74eda-6200-481d-9b7e-4982c914dd56" />
-
+<img width="314" height="245" alt="image" src="https://github.com/user-attachments/assets/349d5dd1-27b1-447c-bcac-5fd6fd7efba8" />
+  
 - Remembers a separate setting for every monitor and every resolution.
 <img width="349" height="81" alt="image" src="https://github.com/user-attachments/assets/57f2727f-f141-4041-ab19-003584d00263" />
 
 - Six built-in test patterns: geometry, colour, greyscale, convergence,
   sharpness and overscan.
-<img width="349" height="96" alt="image" src="https://github.com/user-attachments/assets/aa118b8b-25b7-458d-9108-a1819a6cddb6" />
+<img width="352" height="145" alt="image" src="https://github.com/user-attachments/assets/67eabcb0-117c-4376-9a1f-a9e7396c0d58" />
+
 
 - English and Hungarian.
 
