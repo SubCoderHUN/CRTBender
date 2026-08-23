@@ -14,6 +14,8 @@ namespace {
 
 constexpr const wchar_t* kOverlayClass = L"CRTBenderOverlayWindowXP";
 constexpr UINT  kTimerTopmost = 1;
+// Same reason as the Win10 overlay: menus steal the topmost slot briefly.
+constexpr DWORD kTopmostIntervalMs = 250;
 constexpr DWORD kFrameTimeMs  = 16;   // target about 60 FPS; Present may pace it lower
 constexpr DWORD kRetryTimeMs  = 1000;
 
@@ -91,6 +93,7 @@ struct WarpEngine::Impl {
     std::vector<WORD>     indices;
 
     bool CreateOverlayWindow(HINSTANCE inst);
+    void EnsureTopmost();
     bool InitGraphics();
     void ShutdownGraphics();
     bool InitCapture();
@@ -142,10 +145,8 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         return TRUE;
 
     case WM_TIMER:
-        if (wp == kTimerTopmost && impl && impl->visible) {
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
+        if (wp == kTimerTopmost && impl && impl->visible)
+            impl->EnsureTopmost();
         return 0;
 
     case WM_DESTROY:
@@ -187,8 +188,15 @@ bool WarpEngine::Impl::CreateOverlayWindow(HINSTANCE inst) {
         return false;
     }
 
-    SetTimer(hwnd, kTimerTopmost, 2000, nullptr);
+    SetTimer(hwnd, kTimerTopmost, kTopmostIntervalMs, nullptr);
     return true;
+}
+
+void WarpEngine::Impl::EnsureTopmost() {
+    if (!hwnd) return;
+    if (GetWindow(hwnd, GW_HWNDPREV) == nullptr) return;
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void WarpEngine::Impl::ShutdownGraphics() {
@@ -954,11 +962,13 @@ void WarpEngine::ThreadMain() {
             impl_->gridDirty = true;
         }
 
-        const bool want = (impl_->state.enabled || impl_->state.patternMode != 0) &&
+        const bool want = impl_->state.outputEnabled &&
+                          (impl_->state.enabled || impl_->state.patternMode != 0) &&
                           !impl_->state.bypass;
         if (!want) {
             impl_->SetVisible(false);
             InterlockedExchange(&active_, 0);
+            SetError(L"");
             MsgWaitForMultipleObjectsEx(0, nullptr, 100, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             continue;
         }
@@ -1027,6 +1037,7 @@ void WarpEngine::ThreadMain() {
         }
 
         impl_->SetVisible(true);
+        impl_->EnsureTopmost();
         InterlockedExchange(&active_, 1);
         SetError(L"");
     }

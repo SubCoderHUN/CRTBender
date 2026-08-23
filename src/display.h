@@ -29,6 +29,10 @@ struct MonitorInfo {
     // a cable swap or a change of which monitor is primary.
     std::string  monitorKey;
 
+    // A more specific Windows monitor-instance key for per-monitor on/off
+    // state. This distinguishes two displays with the same model id.
+    std::string  controlKey;
+
     // What to show in the UI, e.g. "DELL P1130 (1600x1200 @ 85 Hz)".
     std::wstring friendlyName;
 

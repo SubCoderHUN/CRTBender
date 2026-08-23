@@ -8,7 +8,7 @@
 ; Elvarja, hogy a tools\build.sh mar lefutott legyen.
 
 #define AppName        "CRTBender"
-#define AppVersion     "2.0.0"
+#define AppVersion     "2.3.1"
 #define AppPublisher   "SubCoderHUN"
 #define AppExeName     "CRTBender.exe"
 

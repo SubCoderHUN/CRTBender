@@ -44,6 +44,8 @@ public:
     virtual void               SelectMonitor(int index) = 0;
     virtual const MonitorInfo& ActiveMonitor() const = 0;
     virtual Profile&           ActiveProfile() = 0;
+    virtual bool ActiveMonitorCorrectionEnabled() const = 0;
+    virtual void SetActiveMonitorCorrectionEnabled(bool enabled) = 0;
 
     // Called after any edit. Pushes the new state to the render threads and,
     // when persist is set, writes the config file.

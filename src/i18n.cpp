@@ -33,7 +33,8 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
 
     // Editor window
     L"CRTBender - geometry calibration",
-    L"Correction enabled  (Ctrl+Alt+B)",
+    L"Correction master switch  (Ctrl+Alt+B)",
+    L"Correction enabled on this monitor",
     L"Test pattern  (Ctrl+Alt+G, exit: Esc)",
     L"Pattern",
     L"Grid size",
@@ -117,6 +118,7 @@ const wchar_t* const kEnglish[static_cast<int>(Str::Count)] = {
     L"magnifies the editor preview only",
     L"bitblt or flip; bitblt is what keeps the overlay click-through",
     L"en or hu",
+    L"correction enabled on this physical monitor",
     L"control point offsets (dx,dy), row 0 is the top of the screen",
 
     // Tabs and monitor selection
@@ -211,7 +213,8 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
 
     // Editor window
     L"CRTBender - geometria kalibrálás",
-    L"Korrekció bekapcsolva  (Ctrl+Alt+B)",
+    L"Korrekció főkapcsolója  (Ctrl+Alt+B)",
+    L"Korrekció engedélyezve ezen a monitoron",
     L"Tesztminta  (Ctrl+Alt+G, kilépés: Esc)",
     L"Minta",
     L"Rács mérete",
@@ -295,6 +298,7 @@ const wchar_t* const kHungarian[static_cast<int>(Str::Count)] = {
     L"csak a szerkesztő előnézetét nagyítja",
     L"bitblt vagy flip; a bitblt tartja kattintás-átengedőnek az átfedést",
     L"en vagy hu",
+    L"korrekció engedélyezése ezen a fizikai monitoron",
     L"kontrollpont-eltolások (dx,dy), a 0. sor a képernyő teteje",
 
     // Tabs and monitor selection

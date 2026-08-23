@@ -201,9 +201,14 @@ void Config::Load() {
         return;
     }
 
+    // Disabled-monitor entries are sparse: a missing section means enabled.
+    // Clear first so a re-read cannot keep a stale off switch.
+    monitorEnabled_.clear();
+
     std::istringstream in(text);
     std::string line;
     std::string section;
+    std::string monitorKey;
     Profile*    profile = nullptr;
 
     while (std::getline(in, line)) {
@@ -213,9 +218,12 @@ void Config::Load() {
         if (line.front() == '[' && line.back() == ']') {
             section = Trim(line.substr(1, line.size() - 2));
             profile = nullptr;
+            monitorKey.clear();
             if (section.rfind("profile:", 0) == 0) {
                 const std::string key = Trim(section.substr(8));
                 if (!key.empty()) profile = &ProfileFor(key);
+            } else if (section.rfind("monitor:", 0) == 0) {
+                monitorKey = Trim(section.substr(8));
             }
             continue;
         }
@@ -247,6 +255,14 @@ void Config::Load() {
             else if (key == "tessellation")    settings_.tessellation  = std::clamp(ParseInt(val, 96), 16, 256);
             else if (key == "pattern_cells")   settings_.patternCells  = std::clamp(ParseInt(val, 8), 2, 64);
             else if (key == "pattern_opacity") settings_.patternOpacityPct = std::clamp(ParseInt(val, 85), 5, 100);
+            continue;
+        }
+
+        if (!monitorKey.empty()) {
+            if (key == "enabled") {
+                SetMonitorCorrectionEnabled(
+                    monitorKey, ParseBool(val, MonitorCorrectionEnabled(monitorKey)));
+            }
             continue;
         }
 
@@ -356,6 +372,12 @@ bool Config::Save() const {
                settings_.flipPresent ? "flip" : "bitblt", T8(Str::CfgPresentMode));
     out += Fmt("preview_gain    = %d       # %s\n", settings_.previewGain, T8(Str::CfgPreviewGain));
     out += Fmt("tessellation    = %d\n", settings_.tessellation);
+
+    for (const auto& [monitorKey, enabled] : monitorEnabled_) {
+        if (enabled) continue;
+        out += Fmt("\n[monitor:%s]\n", monitorKey.c_str());
+        out += Fmt("enabled = 0       # %s\n", T8(Str::CfgMonitorEnabled));
+    }
 
     for (const auto& [key, profile] : profiles_) {
         const WarpMesh& mesh = profile.mesh;

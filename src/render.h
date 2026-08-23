@@ -38,6 +38,7 @@ struct RenderState {
     ConvergenceParams convergence;
 
     bool  enabled        = true;
+    bool  outputEnabled  = true;   // false removes the overlay from this monitor
     // Set by the auto-bypass watcher: the correction is wanted, but showing it
     // right now would do more harm than good (protected video would come out
     // black, an exclusive fullscreen app owns the output).

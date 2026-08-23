@@ -42,6 +42,7 @@ enum class Str {
     // Editor window
     EdWindowTitle,
     EdEnabled,
+    EdMonitorEnabled,
     EdPatternLabel,
     EdPatternTypeLabel,
     EdGridLabel,
@@ -100,6 +101,7 @@ enum class Str {
     CfgPreviewGain,
     CfgPresentMode,
     CfgLanguage,
+    CfgMonitorEnabled,
     CfgProfilePoints,
 
     // Tabs and monitor selection
@@ -145,6 +147,6 @@ const wchar_t* LanguageDisplayName(Lang lang);   // always in its own language
 
 constexpr const wchar_t* kProjectUrl = L"https://github.com/SubCoderHUN/CRTBender";
 constexpr const wchar_t* kAuthor     = L"SubCoderHUN";
-constexpr const wchar_t* kVersion    = L"2.0.0";
+constexpr const wchar_t* kVersion    = L"2.3.1";
 
 } // namespace crtb

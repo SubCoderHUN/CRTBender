@@ -23,6 +23,10 @@ namespace {
 
 constexpr const wchar_t* kOverlayClass = L"CRTBenderOverlayWindow";
 constexpr UINT kTimerTopmost = 1;
+// Dropdowns and context menus are also topmost. They briefly climb above the
+// overlay; reclaiming within a few hundred milliseconds keeps correction on
+// them instead of leaving a 1-2 second uncorrected flash.
+constexpr DWORD kTopmostIntervalMs = 250;
 constexpr DWORD kCaptureWatchdogMs = 100;
 
 enum class CaptureProbeResult {
@@ -137,6 +141,7 @@ struct WarpEngine::Impl {
     CaptureProbeResult ProbeCapture();
 
     bool CreateOverlayWindow(HINSTANCE inst);
+    void EnsureTopmost();
     bool RefreshCaptureExclusion();
     bool InitGraphics();
     void ShutdownGraphics();
@@ -196,10 +201,8 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         return TRUE;
 
     case WM_TIMER:
-        if (wp == kTimerTopmost && impl && impl->visible) {
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
+        if (wp == kTimerTopmost && impl && impl->visible)
+            impl->EnsureTopmost();
         return 0;
 
     case WM_DESTROY:
@@ -264,8 +267,18 @@ bool WarpEngine::Impl::CreateOverlayWindow(HINSTANCE inst) {
     if (!RefreshCaptureExclusion())
         return abandon(L"Capture exclusion was not honoured by the system");
 
-    SetTimer(hwnd, kTimerTopmost, 2000, nullptr);
+    SetTimer(hwnd, kTimerTopmost, kTopmostIntervalMs, nullptr);
     return true;
+}
+
+void WarpEngine::Impl::EnsureTopmost() {
+    if (!hwnd) return;
+    // GW_HWNDPREV is the window immediately above us. Menus and combo
+    // dropdowns insert themselves there; leave the overlay alone when it is
+    // already at the top of the topmost band.
+    if (GetWindow(hwnd, GW_HWNDPREV) == nullptr) return;
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 bool WarpEngine::Impl::RefreshCaptureExclusion() {
@@ -961,10 +974,12 @@ void WarpEngine::ThreadMain() {
         if (version != applied) {
             std::lock_guard<std::mutex> lock(stateMutex_);
             const bool wasRequested =
-                impl_->state.enabled || impl_->state.patternMode != 0;
+                impl_->state.outputEnabled &&
+                (impl_->state.enabled || impl_->state.patternMode != 0);
             impl_->state = pending_;
             const bool isRequested =
-                impl_->state.enabled || impl_->state.patternMode != 0;
+                impl_->state.outputEnabled &&
+                (impl_->state.enabled || impl_->state.patternMode != 0);
             if (!wasRequested && isRequested) {
                 impl_->captureCircuitOpen = false;
                 impl_->captureRecoveryFailures = 0;
@@ -975,13 +990,15 @@ void WarpEngine::ThreadMain() {
             impl_->forceDraw = true;
         }
 
-        const bool want = (impl_->state.enabled || impl_->state.patternMode != 0) &&
+        const bool want = impl_->state.outputEnabled &&
+                          (impl_->state.enabled || impl_->state.patternMode != 0) &&
                           !impl_->state.bypass;
         if (!want) {
             if (impl_->visible) impl_->SetVisible(false);
             if (impl_->dupl) { impl_->dupl->ReleaseFrame(); impl_->dupl.Reset(); }
             impl_->haveFrame = false;
             active_.store(false);
+            SetError(L"");
             MsgWaitForMultipleObjectsEx(0, nullptr, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             continue;
         }
@@ -1176,6 +1193,10 @@ void WarpEngine::ThreadMain() {
                 impl_->forceDraw = true;
                 continue;
             }
+            // A freshly opened menu usually produces a new desktop frame. Pull
+            // the overlay back above it on that same present so correction
+            // does not wait for the idle topmost timer.
+            impl_->EnsureTopmost();
             active_.store(true);
         }
     }

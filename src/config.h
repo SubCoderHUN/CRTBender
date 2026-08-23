@@ -90,6 +90,18 @@ public:
     Profile& ProfileFor(const std::string& key);
     bool     HasProfile(const std::string& key) const;
 
+    // Monitor-level master switch. Unlike profiles, this follows the physical
+    // monitor across resolution and refresh-rate changes.
+    bool MonitorCorrectionEnabled(const std::string& monitorKey) const {
+        const auto it = monitorEnabled_.find(monitorKey);
+        return it == monitorEnabled_.end() || it->second;
+    }
+    void SetMonitorCorrectionEnabled(const std::string& monitorKey, bool enabled) {
+        if (monitorKey.empty()) return;
+        if (enabled) monitorEnabled_.erase(monitorKey);
+        else         monitorEnabled_[monitorKey] = false;
+    }
+
     // Pre-1.2 configs keyed profiles by display mode alone, with no monitor
     // part, and only ever described the primary monitor. Adopts such a profile
     // under the new key when nothing better exists. Returns true if it did.
@@ -102,6 +114,7 @@ private:
 
     std::wstring                   path_;
     Settings                       settings_;
+    std::map<std::string, bool>    monitorEnabled_;
     std::map<std::string, Profile> profiles_;
 };
 

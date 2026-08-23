@@ -103,6 +103,21 @@ int main() {
         if (!ok) ++g_failures;
     }
 
+    std::printf("\n== monitor-level correction switch ==\n");
+    {
+        Config config;
+        CheckBool(config.MonitorCorrectionEnabled("MONITOR_A"), true,
+                  "new monitors are enabled by default");
+        config.SetMonitorCorrectionEnabled("MONITOR_A", false);
+        CheckBool(config.MonitorCorrectionEnabled("MONITOR_A"), false,
+                  "one monitor can be disabled");
+        CheckBool(config.MonitorCorrectionEnabled("MONITOR_B"), true,
+                  "another monitor remains enabled");
+        config.SetMonitorCorrectionEnabled("MONITOR_A", true);
+        CheckBool(config.MonitorCorrectionEnabled("MONITOR_A"), true,
+                  "re-enabling restores the default");
+    }
+
     std::printf("\n== the settings that actually broke ==\n");
     // Written form -> what the reader must conclude.
     CheckStr(ConfigValue("hu      # en vagy hu"), "hu", "language survives (Hungarian)");

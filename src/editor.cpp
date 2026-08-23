@@ -25,6 +25,7 @@ enum ControlId : int {
     // Always visible, above the tabs
     CTL_LBL_MONITOR = 1001,
     CTL_MONITOR,
+    CTL_MONITOR_ENABLED,
     CTL_ENABLED,
     CTL_LBL_PATTERN,
     CTL_PATTERN,
@@ -410,6 +411,7 @@ void EditorWindow::CreateControls(HWND hwnd) {
     // Always visible
     MakeChild(hwnd, L"STATIC", SS_LEFT, CTL_LBL_MONITOR, inst_);
     MakeChild(hwnd, L"COMBOBOX", CBS_DROPDOWNLIST | WS_VSCROLL, CTL_MONITOR, inst_);
+    MakeChild(hwnd, L"BUTTON", BS_AUTOCHECKBOX, CTL_MONITOR_ENABLED, inst_);
     MakeChild(hwnd, L"BUTTON", BS_AUTOCHECKBOX, CTL_ENABLED, inst_);
     MakeChild(hwnd, L"STATIC", SS_LEFT, CTL_LBL_PATTERN, inst_);
     MakeChild(hwnd, L"COMBOBOX", CBS_DROPDOWNLIST | WS_VSCROLL, CTL_PATTERN, inst_);
@@ -555,6 +557,7 @@ void EditorWindow::RelabelControls() {
     SetWindowTextW(hwnd_, T(Str::EdWindowTitle));
 
     SetTextOn(Ctl(CTL_LBL_MONITOR), T(Str::EdMonitorLabel));
+    SetTextOn(Ctl(CTL_MONITOR_ENABLED), T(Str::EdMonitorEnabled));
     SetTextOn(Ctl(CTL_ENABLED),     T(Str::EdEnabled));
     SetTextOn(Ctl(CTL_LBL_PATTERN), T(Str::EdPatternLabel));
     SetTextOn(Ctl(CTL_LBL_PATTERN_TYPE), T(Str::EdPatternTypeLabel));
@@ -654,9 +657,12 @@ void EditorWindow::RelabelControls() {
         if (combo) {
             SendMessageW(combo, CB_RESETCONTENT, 0, 0);
             for (const MonitorInfo& monitor : host_->Monitors()) {
+                const size_t slash = monitor.deviceName.find_last_of(L'\\');
+                const std::wstring output = slash == std::wstring::npos
+                    ? monitor.deviceName : monitor.deviceName.substr(slash + 1);
                 wchar_t entry[256];
-                swprintf(entry, std::size(entry), L"%ls  (%d x %d @ %d Hz)",
-                         monitor.friendlyName.c_str(),
+                swprintf(entry, std::size(entry), L"%ls  [%ls]  (%d x %d @ %d Hz)",
+                         monitor.friendlyName.c_str(), output.c_str(),
                          monitor.width, monitor.height, monitor.refresh);
                 SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(entry));
             }
@@ -772,6 +778,7 @@ void EditorWindow::LayoutControls() {
     // --- always visible, above the tabs
     place(CTL_LBL_MONITOR, labelH);   y += labelH + gapS;
     place(CTL_MONITOR, comboH);       y += rowH + gapM;
+    place(CTL_MONITOR_ENABLED, rowH); y += rowH + gapS;
     place(CTL_ENABLED, rowH);         y += rowH + gapM;
     place(CTL_LBL_PATTERN, labelH);   y += labelH + gapS;
     place(CTL_PATTERN, comboH);       y += rowH + gapM;
@@ -1012,6 +1019,8 @@ void EditorWindow::SyncControlsFromModel() {
     const Settings& s = host_->HostSettings();
     const Profile&  p = host_->ActiveProfile();
 
+    SendMessageW(Ctl(CTL_MONITOR_ENABLED), BM_SETCHECK,
+                 host_->ActiveMonitorCorrectionEnabled() ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(Ctl(CTL_ENABLED), BM_SETCHECK, s.enabled    ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(Ctl(CTL_MIRROR), BM_SETCHECK, s.mirror     ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(Ctl(CTL_FREEMOVE), BM_SETCHECK, s.freeMove   ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1112,6 +1121,10 @@ void EditorWindow::ApplyControlsToModel(int controlId) {
         persist = false;
     } else {
         switch (controlId) {
+        case CTL_MONITOR_ENABLED:
+            host_->SetActiveMonitorCorrectionEnabled(
+                SendMessageW(Ctl(CTL_MONITOR_ENABLED), BM_GETCHECK, 0, 0) == BST_CHECKED);
+            break;
         case CTL_ENABLED:
             s.enabled = SendMessageW(Ctl(CTL_ENABLED), BM_GETCHECK, 0, 0) == BST_CHECKED;
             break;

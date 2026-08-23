@@ -131,6 +131,12 @@ public:
     void SelectMonitor(int index) override;
     const MonitorInfo& ActiveMonitor() const override;
     Profile& ActiveProfile() override { return config_.ProfileFor(ActiveMonitor().ProfileKey()); }
+    bool ActiveMonitorCorrectionEnabled() const override {
+        return config_.MonitorCorrectionEnabled(ActiveMonitor().controlKey);
+    }
+    void SetActiveMonitorCorrectionEnabled(bool enabled) override {
+        config_.SetMonitorCorrectionEnabled(ActiveMonitor().controlKey, enabled);
+    }
 
     void         OnEditorChanged(bool persist) override;
     bool         GetAutostart() const override { return IsAutostartEnabled(); }
@@ -222,6 +228,8 @@ void App::PushStates() {
         state.geometry       = profile.geometry;
         state.convergence    = profile.convergence;
         state.enabled        = s.enabled;
+        state.outputEnabled  =
+            config_.MonitorCorrectionEnabled(monitor.controlKey);
         const HMONITOR monitorHandle =
             MonitorFromRect(&monitor.rect, MONITOR_DEFAULTTONULL);
         state.bypass         = bypassActive_ && monitorHandle == bypassMonitor_;
@@ -290,7 +298,8 @@ void App::RebuildMonitors(bool force) {
     bool changed = force || current.size() != monitors_.size();
     for (size_t i = 0; !changed && i < current.size(); ++i) {
         changed = current[i].ProfileKey() != monitors_[i].ProfileKey() ||
-                  current[i].deviceName  != monitors_[i].deviceName;
+                  current[i].deviceName  != monitors_[i].deviceName ||
+                  current[i].controlKey  != monitors_[i].controlKey;
     }
     if (!changed) return;
 
